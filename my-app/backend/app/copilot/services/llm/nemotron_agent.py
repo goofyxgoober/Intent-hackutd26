@@ -13,7 +13,7 @@ from app.copilot.models.schemas import (
 from app.copilot.services.graph.factory import GraphStoreFactory
 from app.copilot.services.token_service import estimate_tokens, calculate_token_metrics
 
-NVIDIA_API_KEY = os.getenv("NVIDIA_API_KEY")
+NVIDIA_API_KEY = os.getenv("JEV_API_KEY") or os.getenv("NVIDIA_API_KEY")
 NVIDIA_MODEL = os.getenv("NVIDIA_MODEL", "nvidia/llama-3.1-nemotron-70b-instruct")
 NVIDIA_BASE_URL = "https://integrate.api.nvidia.com/v1"
 

@@ -49,7 +49,7 @@ class Nemotron:
         if client is not None:
             self.client = client
         else:
-            api_key = os.getenv("NVIDIA_API_KEY", "dummy_key")
+            api_key = os.getenv("JEV_API_KEY") or os.getenv("NVIDIA_API_KEY", "dummy_key")
             base_url = os.getenv("NEMOTRON_BASE_URL", "https://integrate.api.nvidia.com/v1")
             self.client = AsyncOpenAI(base_url=base_url, api_key=api_key, timeout=300)
 
