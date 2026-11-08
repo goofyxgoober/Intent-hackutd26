@@ -1,4 +1,5 @@
 import { useEffect, useState } from "react";
+import { Link } from "react-router-dom";
 import { useAuth } from "../auth/AuthContext";
 import { NodeCard, PROMPT, Stages, StatusBar, Terminal, TopBar } from "../components/Chrome";
 
@@ -71,7 +72,9 @@ export default function Dashboard() {
                 <div>lang: {r.language ?? "—"}</div>
                 <div>branch: {r.default_branch}</div>
               </div>
-              <span className="link-purple">[sync repo]</span>
+              <Link className="link-purple" to={`/repos/${r.full_name}`}>
+                [open repo]
+              </Link>
             </NodeCard>
           ))}
         </section>

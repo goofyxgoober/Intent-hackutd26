@@ -1,18 +1,16 @@
 import secrets
+from typing import Optional
 from urllib.parse import urlencode
 
-import httpx
 from fastapi import APIRouter, Depends, HTTPException, Request, Response
 from fastapi.responses import RedirectResponse
 
+from . import db
 from .config import settings
+from .github_client import GITHUB_WEB, client
 from .sessions import Session, create_session, delete_session, get_session
 
 router = APIRouter(prefix="/auth", tags=["auth"])
-
-GITHUB_AUTHORIZE_URL = "https://github.com/login/oauth/authorize"
-GITHUB_TOKEN_URL = "https://github.com/login/oauth/access_token"
-GITHUB_API = "https://api.github.com"
 
 
 def _public_user(user: dict) -> dict:
@@ -22,6 +20,7 @@ def _public_user(user: dict) -> dict:
         "name": user.get("name"),
         "avatar_url": user.get("avatar_url"),
         "html_url": user.get("html_url"),
+        "two_factor_authentication": user.get("two_factor_authentication"),
     }
 
 
@@ -39,7 +38,7 @@ def _login_error(reason: str) -> RedirectResponse:
 @router.get("/github/login")
 def github_login() -> RedirectResponse:
     if not settings.github_client_id:
-        raise HTTPException(500, "GITHUB_CLIENT_ID is not configured")
+        raise HTTPException(500, "GITHUB_CLIENT_ID is not set in backend/.env")
     state = secrets.token_urlsafe(24)
     params = {
         "client_id": settings.github_client_id,
@@ -48,7 +47,7 @@ def github_login() -> RedirectResponse:
         "state": state,
         "allow_signup": "true",
     }
-    response = RedirectResponse(f"{GITHUB_AUTHORIZE_URL}?{urlencode(params)}")
+    response = RedirectResponse(f"{GITHUB_WEB}/login/oauth/authorize?{urlencode(params)}")
     response.set_cookie(
         settings.state_cookie,
         state,
@@ -63,9 +62,9 @@ def github_login() -> RedirectResponse:
 @router.get("/github/callback")
 async def github_callback(
     request: Request,
-    code: str | None = None,
-    state: str | None = None,
-    error: str | None = None,
+    code: Optional[str] = None,
+    state: Optional[str] = None,
+    error: Optional[str] = None,
 ) -> RedirectResponse:
     if error:
         return _login_error(error)
@@ -73,9 +72,9 @@ async def github_callback(
     if not code or not state or not expected_state or not secrets.compare_digest(state, expected_state):
         return _login_error("invalid_state")
 
-    async with httpx.AsyncClient(timeout=10) as client:
-        token_res = await client.post(
-            GITHUB_TOKEN_URL,
+    async with client(GITHUB_WEB) as web:
+        token_res = await web.post(
+            "/login/oauth/access_token",
             headers={"Accept": "application/json"},
             data={
                 "client_id": settings.github_client_id,
@@ -84,21 +83,28 @@ async def github_callback(
                 "redirect_uri": settings.redirect_uri,
             },
         )
-        access_token = token_res.json().get("access_token") if token_res.is_success else None
-        if not access_token:
-            return _login_error("token_exchange_failed")
+    access_token = token_res.json().get("access_token") if token_res.is_success else None
+    if not access_token:
+        return _login_error("token_exchange_failed")
 
-        user_res = await client.get(
-            f"{GITHUB_API}/user",
+    async with client() as api:
+        user_res = await api.get(
+            "/user",
             headers={
                 "Authorization": f"Bearer {access_token}",
                 "Accept": "application/vnd.github+json",
             },
         )
-        if not user_res.is_success:
-            return _login_error("user_fetch_failed")
+    if not user_res.is_success:
+        return _login_error("user_fetch_failed")
+    user = user_res.json()
 
-    sid = create_session(access_token, _public_user(user_res.json()))
+    # GitHub reports this flag only to the account owner's own token.
+    if settings.require_2fa and user.get("two_factor_authentication") is not True:
+        return _login_error("2fa_required")
+
+    user_id = db.upsert_user(user["id"], user["login"])
+    sid = create_session(access_token, _public_user(user), user_id)
     response = RedirectResponse(f"{settings.frontend_url}/dashboard")
     response.delete_cookie(settings.state_cookie)
     response.set_cookie(

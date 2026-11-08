@@ -39,9 +39,11 @@ export function StatusBar({ sync }: { sync: string }) {
   return (
     <footer className="statusbar">
       <div>
-        <span className="dim">ast parser:</span> tree-sitter (Indra)
+        <span className="dim">annotation:</span> LLM, two-pass (Indra)
         <span className="sep">·</span>
-        <span className="dim">graph:</span> NetworkX (Vishjit)
+        <span className="dim">import edges:</span> pattern matching
+        <span className="sep">·</span>
+        <span className="dim">views:</span> Vishjit
         <span className="sep">·</span>
         <span className="dim">github sync:</span> {sync}
       </div>
@@ -89,8 +91,8 @@ export function NodeCard({
   className = "",
 }: {
   name: string;
-  tag?: string;
-  tagTone?: "ok" | "muted";
+  tag?: ReactNode;
+  tagTone?: "ok" | "muted" | "warn";
   summary?: string;
   children?: ReactNode;
   className?: string;
@@ -99,7 +101,7 @@ export function NodeCard({
     <article className={`node ${className}`}>
       <div className="node-head">
         <span className="node-name">{name}</span>
-        {tag && <span className={tagTone === "ok" ? "node-tag ok" : "node-tag"}>{tag}</span>}
+        {tag && <span className={`node-tag ${tagTone ?? ""}`}>{tag}</span>}
       </div>
       {summary && <p className="node-summary hand">{summary}</p>}
       {children && <div className="node-body">{children}</div>}

@@ -10,6 +10,7 @@ export default defineConfig({
       "/auth/me": "http://localhost:8000",
       "/auth/logout": "http://localhost:8000",
       "/api": "http://localhost:8000",
+      "/ws": { target: "ws://localhost:8000", ws: true },
     },
   },
 });
