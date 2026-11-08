@@ -91,7 +91,7 @@ export function NodeCard({
   className = "",
 }: {
   name: string;
-  tag?: string;
+  tag?: ReactNode;
   tagTone?: "ok" | "muted" | "warn";
   summary?: string;
   children?: ReactNode;

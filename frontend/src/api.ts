@@ -28,6 +28,8 @@ export interface ChangedFile {
   deletions: number;
   patch: string | null;
   patch_truncated?: boolean;
+  /** Line ranges [start, end]: `added` in the new file, `removed` in the old file. */
+  changed_lines?: { added: [number, number][]; removed: [number, number][] };
 }
 
 export interface CommitSummary {
@@ -67,10 +69,22 @@ export interface Changes {
   /** Present when this object is the result of a sync rather than a preview. */
   synced?: boolean;
   status?: string;
+  /** For batches: "poll", "manual" or "webhook". */
+  source?: string;
+  created_at?: number;
   file_count?: number;
   files: ChangedFile[];
   commits: CommitSummary[];
   affected_tenets: string[];
   changed_leaves: string[];
   rerun_claims: string[];
+}
+
+export interface PollStatus {
+  polling: boolean;
+  interval_seconds: number;
+  last_checked_at: number | null;
+  last_seen_head: string | null;
+  last_error: string | null;
+  last_synced_sha: string | null;
 }

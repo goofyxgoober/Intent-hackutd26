@@ -1,7 +1,7 @@
 import { useEffect, useState } from "react";
-import { api, type Changes, type CommitDetail, type CommitSummary, type Comparison } from "../api";
+import { api, type Changes, type CommitDetail, type CommitSummary, type Comparison, type PollStatus } from "../api";
 import { NodeCard } from "./Chrome";
-import { CommitList, FileDiffList, shortSha } from "./GitViews";
+import { CommitList, FileDiffList, shortSha, timeAgo } from "./GitViews";
 
 const plural = (n: number, word: string) => `${n} ${word}${n === 1 ? "" : "s"}`;
 /** Commit message without its first line (already shown in the row). */
@@ -12,14 +12,18 @@ export type RepoTab = "changes" | "history" | "compare";
 interface Props {
   owner: string;
   repo: string;
+  /** Most recent batch with file changes, or null if none yet. */
+  latest: Changes | null;
+  /** Read-only preview since the last sync (used before anything is synced). */
   changes: Changes | null;
+  poll: PollStatus | null;
   tab: RepoTab;
   onTab: (t: RepoTab) => void;
   historyPath: string | null;
   onHistoryPath: (path: string | null) => void;
 }
 
-export function RepoPanel({ owner, repo, changes, tab, onTab, historyPath, onHistoryPath }: Props) {
+export function RepoPanel({ owner, repo, latest, changes, poll, tab, onTab, historyPath, onHistoryPath }: Props) {
   const gh = `/api/github/repos/${owner}/${repo}`;
   const showHistory = (path: string) => {
     onHistoryPath(path);
@@ -27,7 +31,7 @@ export function RepoPanel({ owner, repo, changes, tab, onTab, historyPath, onHis
   };
 
   return (
-    <NodeCard name={`${owner}/${repo}`} tag={changes ? `head ${shortSha(changes.head)}` : "loading…"}>
+    <NodeCard name={`${owner}/${repo}`} tag={<WatchTag poll={poll} />}>
       <div className="tabs" role="tablist">
         {(["changes", "history", "compare"] as RepoTab[]).map((t) => (
           <button
@@ -41,36 +45,53 @@ export function RepoPanel({ owner, repo, changes, tab, onTab, historyPath, onHis
           </button>
         ))}
       </div>
-      {tab === "changes" && <ChangesTab changes={changes} gh={gh} onHistory={showHistory} />}
+      {tab === "changes" && <ChangesTab latest={latest} changes={changes} gh={gh} onHistory={showHistory} />}
       {tab === "history" && <HistoryTab gh={gh} path={historyPath} onPath={onHistoryPath} />}
       {tab === "compare" && <CompareTab gh={gh} onHistory={showHistory} />}
     </NodeCard>
   );
 }
 
-function ChangesTab({ changes, gh, onHistory }: { changes: Changes | null; gh: string; onHistory: (p: string) => void }) {
-  if (!changes) return <p className="hand dim lead">Reading the repository…</p>;
-  if (changes.initial_sync)
-    return <p className="hand lead">Not synced yet. Sync to ingest the repo and set a baseline.</p>;
-  if (changes.initial)
-    return <p className="hand lead">Ingested {plural(changes.file_count ?? 0, "file")}. Changes are tracked from here.</p>;
-  if (changes.files.length === 0) return <p className="hand lead">Up to date with the last sync.</p>;
-  const range = `${shortSha(changes.base ?? "")} → ${shortSha(changes.head)}`;
+function WatchTag({ poll }: { poll: PollStatus | null }) {
+  if (!poll) return <>loading…</>;
+  if (!poll.polling) return <span className="dim">not watching</span>;
+  const checked = poll.last_checked_at ? timeAgo(new Date(poll.last_checked_at * 1000).toISOString()) : "soon";
+  return (
+    <span title={poll.last_error ?? undefined} className={poll.last_error ? "red" : ""}>
+      <span className="live-dot" /> watching · every {poll.interval_seconds}s · checked {checked}
+    </span>
+  );
+}
+
+function ChangesTab({ latest, changes, gh, onHistory }: {
+  latest: Changes | null;
+  changes: Changes | null;
+  gh: string;
+  onHistory: (p: string) => void;
+}) {
+  if (!latest) {
+    if (!changes) return <p className="hand dim lead">Reading the repository…</p>;
+    if (changes.initial_sync)
+      return <p className="hand lead">Not synced yet. Sync once to ingest the repo; new commits are picked up automatically after that.</p>;
+    return <p className="hand lead">No changes since IntentFlow started watching. New commits show up here on their own.</p>;
+  }
+  const when = latest.created_at ? timeAgo(new Date(latest.created_at * 1000).toISOString()) : "";
+  const how = latest.source === "poll" ? "picked up automatically" : latest.source === "webhook" ? "pushed" : "synced by hand";
   return (
     <>
       <p className="hand lead">
-        {changes.synced
-          ? `${plural(changes.files.length, "file")} modified in this sync (${range}).`
-          : `${plural(changes.files.length, "file")} modified since the last sync (${range}).`}
+        Latest change: {plural(latest.files.length, "file")}
+        {latest.commits.length > 0 && ` in ${plural(latest.commits.length, "commit")}`}.
       </p>
-      {changes.affected_tenets.length > 0 && (
-        <p className="dim small">
-          {plural(changes.affected_tenets.length, "tenet")} affected · {plural(changes.rerun_claims.length, "claim")} to re-test
-        </p>
-      )}
+      <p className="dim small">
+        {shortSha(latest.base ?? "")} → {shortSha(latest.head)} · {how} {when}
+        {latest.affected_tenets.length > 0 &&
+          ` · ${plural(latest.affected_tenets.length, "tenet")} affected · ${plural(latest.rerun_claims.length, "claim")} to re-test`}
+      </p>
+      {latest.commits.length > 0 && <CommitList commits={latest.commits} />}
       <FileDiffList
-        files={changes.files}
-        rawDiffUrl={changes.base ? `${gh}/diff?base=${changes.base}&head=${changes.head}` : undefined}
+        files={latest.files}
+        rawDiffUrl={latest.base ? `${gh}/diff?base=${latest.base}&head=${latest.head}` : undefined}
         onHistory={onHistory}
       />
     </>

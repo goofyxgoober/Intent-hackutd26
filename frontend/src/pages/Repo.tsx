@@ -1,6 +1,6 @@
 import { useCallback, useEffect, useMemo, useRef, useState } from "react";
 import { Link, useParams } from "react-router-dom";
-import { api, type Changes } from "../api";
+import { api, type Changes, type PollStatus } from "../api";
 import { useAuth } from "../auth/AuthContext";
 import { Stages, StatusBar, Terminal, TopBar } from "../components/Chrome";
 import { IntentPanel } from "../components/IntentPanel";
@@ -17,6 +17,8 @@ export default function Repo() {
 
   const [workspaceId, setWorkspaceId] = useState<number | null>(null);
   const [changes, setChanges] = useState<Changes | null>(null);
+  const [latest, setLatest] = useState<Changes | null>(null);
+  const [poll, setPoll] = useState<PollStatus | null>(null);
   const [tree, setTree] = useState<TreeView | null>(null);
   const [log, setLog] = useState<Line[]>([]);
   const [tab, setTab] = useState<RepoTab>("changes");
@@ -30,6 +32,20 @@ export default function Repo() {
   const loadTree = useCallback(async () => {
     if (wsApi) setTree(await wsApi.tree());
   }, [wsApi]);
+
+  const loadLatest = useCallback(async () => {
+    if (workspaceId === null) return;
+    const wsBase = `/api/workspaces/${workspaceId}`;
+    // Asking for the status also counts as activity, which keeps polling alive while the page is open.
+    setPoll(await api<PollStatus>(`${wsBase}/sync/status`));
+    setLatest(await api<Changes | null>(`${wsBase}/sync/latest`));
+  }, [workspaceId]);
+
+  useEffect(() => {
+    loadLatest().catch(() => undefined);
+    const timer = setInterval(() => loadLatest().catch(() => undefined), 10000);
+    return () => clearInterval(timer);
+  }, [loadLatest]);
 
   useEffect(() => {
     (async () => {
@@ -51,8 +67,18 @@ export default function Repo() {
   const live = useWorkspaceEvents(workspaceId, (e: WorkspaceEvent) => {
     if (e.type === "hello") return;
     if (e.type === "sync.batch") {
-      const b = e.batch as { id: number; source: string; affected_tenets: string[] };
-      if (b.source === "webhook") say(`⇣ push received · batch ${b.id} · ${b.affected_tenets.length} tenets affected`, "dim");
+      const b = e.batch as { id: number; source: string; head: string; initial?: boolean; file_count?: number; affected_tenets: string[] };
+      if (b.source !== "manual") {
+        const affected = b.affected_tenets.length ? ` · ${b.affected_tenets.length} tenets affected` : "";
+        say(
+          b.initial
+            ? `✓ repo ingested automatically (${b.file_count ?? 0} files at ${b.head.slice(0, 7)})`
+            : `⇣ new commits on GitHub · now at ${b.head.slice(0, 7)}${affected}`,
+          "green",
+        );
+      }
+      setTab("changes");
+      loadLatest().catch(() => undefined);
     }
     else if (e.type === "jev.verdict") say(`jev → ${e.verdict} (${e.confidence}): ${e.reason}`, e.verdict === "axiom_conflict" ? "red" : "dim");
     else if (e.type === "result.appended") say(`test ${e.claim_id} → ${e.verdict}`, e.verdict === "fail" ? "red" : "dim");
@@ -73,7 +99,7 @@ export default function Repo() {
         );
       setChanges({ ...r, synced: true });
       setTab("changes");
-      await loadTree();
+      await Promise.all([loadTree(), loadLatest()]);
     } catch (e) {
       say(`✗ ${(e as Error).message}`, "red");
     } finally {
@@ -131,7 +157,7 @@ export default function Repo() {
       <main className="canvas repo-canvas">
         <section className="col">
           <div ref={panelRef}>
-            <RepoPanel owner={owner} repo={repo} changes={changes} tab={tab} onTab={setTab}
+            <RepoPanel owner={owner} repo={repo} latest={latest} changes={changes} poll={poll} tab={tab} onTab={setTab}
               historyPath={historyPath} onHistoryPath={setHistoryPath} />
           </div>
           {wsApi && <IntentPanel tree={tree} wsApi={wsApi} say={say} onChanged={() => loadTree()} />}

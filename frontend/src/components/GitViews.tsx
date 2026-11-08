@@ -14,7 +14,29 @@ export function timeAgo(iso: string) {
   return new Date(iso).toLocaleDateString();
 }
 
-/** Changed files with +/- counts; click a file to show its diff. */
+function fmtRanges(ranges: [number, number][]): string {
+  return ranges.map(([a, b]) => (a === b ? `${a}` : `${a}–${b}`)).join(", ");
+}
+
+/** "+ lines 12–15, 40 · − line 11" for one file. */
+export function ChangedLines({ file }: { file: ChangedFile }) {
+  const cl = file.changed_lines;
+  if (!cl || (cl.added.length === 0 && cl.removed.length === 0)) return null;
+  const count = (r: [number, number][]) => r.reduce((n, [a, b]) => n + b - a + 1, 0);
+  return (
+    <div className="changed-lines small">
+      {cl.added.length > 0 && (
+        <span className="green">+ line{count(cl.added) === 1 ? "" : "s"} {fmtRanges(cl.added)}</span>
+      )}
+      {cl.added.length > 0 && cl.removed.length > 0 && <span className="dim"> · </span>}
+      {cl.removed.length > 0 && (
+        <span className="red">− line{count(cl.removed) === 1 ? "" : "s"} {fmtRanges(cl.removed)}</span>
+      )}
+    </div>
+  );
+}
+
+/** Changed files with +/- counts and line numbers; click a file to show its diff. */
 export function FileDiffList({
   files,
   rawDiffUrl,
@@ -44,6 +66,7 @@ export function FileDiffList({
               </button>
             )}
           </div>
+          <ChangedLines file={f} />
           {open === f.path &&
             (f.patch ? (
               <pre className="patch">

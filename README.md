@@ -78,8 +78,17 @@ folders mirroring ownership and `results/` gitignored. It never writes to the de
 | WS | `/ws/workspaces/{id}` | all (`?key=` for agents) | Live events: `tenet.*`, `claim.*`, `result.appended`, `sync.batch`, `jev.verdict`, ... |
 
 ### Git sync
-Pushes to the default branch arrive by webhook, wait `SYNC_DEBOUNCE_SECONDS` for more, then
-become one batch: the codebase snapshot (file tree + import edges) updates first, renames carry
+**Polling (default, works locally):** while you have a repo open, the backend checks its default
+branch every `POLL_INTERVAL_SECONDS` (30). When the head commit moves, it syncs. It stops after
+`POLL_IDLE_STOP_SECONDS` without use and restarts when you come back. The repo page's
+**changes** tab shows the latest change live: commits, files, and the exact line numbers added
+and removed (`changed_lines`), with the diff a click away. `GET /api/workspaces/{id}/sync/status`
+reports polling state; `GET …/sync/latest` returns the latest change; `POST …/sync/check` polls now.
+
+**Webhooks (optional):** pushes to the default branch arrive by webhook, wait `SYNC_DEBOUNCE_SECONDS` for more, then
+become one batch.
+
+Either way, each batch: the codebase snapshot (file tree + import edges) updates first, renames carry
 annotations and links, and the batch lists affected Tenets (leaf links propagated up through
 owners and references) and Claims to re-test. Jev reviews it via `/jev/verdicts` with `batch_id`.
 The last-synced commit is the diff base, so force pushes need no replay. **sync repo** does the

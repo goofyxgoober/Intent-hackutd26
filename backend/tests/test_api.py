@@ -75,6 +75,8 @@ class FakeGitHub:
             if path == "src/db/user.py":
                 history = history[1:]
             return httpx.Response(200, json=history[: int(req.url.params.get("per_page", 30))])
+        if p == f"/repos/{REPO}/branches/main":
+            return httpx.Response(200, json={"name": "main", "commit": {"sha": self.head}})
         if p == f"/repos/{REPO}/branches":
             return httpx.Response(200, json=[{"name": "main", "commit": {"sha": self.head}}, {"name": "Login", "commit": {"sha": HEAD_SHA}}])
         if p == f"/repos/{REPO}/compare/main...Login":
@@ -87,7 +89,8 @@ class FakeGitHub:
             })
         if p == f"/repos/{REPO}/compare/{BASE_SHA}...{HEAD_SHA}":
             return httpx.Response(200, json={"ahead_by": 1, "files": [
-                {"filename": "src/auth/session.py", "status": "modified", "additions": 3, "deletions": 1, "patch": "@@"},
+                {"filename": "src/auth/session.py", "status": "modified", "additions": 3, "deletions": 1,
+                 "patch": "@@ -1,3 +1,5 @@\n def validate(t):\n-    return t\n+    if expired(t):\n+        raise SessionError\n+    return t\n # end"},
                 {"filename": "src/new.py", "status": "renamed", "previous_filename": "src/old.py"},
             ]})
         if p == f"/repos/{REPO}/git/trees/main":
@@ -213,6 +216,7 @@ def test_commit_detail_includes_diffs(client):
     assert c["parents"] == [BASE_SHA] and c["stats"]["total"] == 4
     session_py, big = c["files"]
     assert session_py["patch"] == "@@ -1 +1 @@" and session_py["patch_truncated"] is False
+    assert session_py["changed_lines"] == {"added": [], "removed": []}  # hunk header only
     assert big["patch"] is None and big["patch_truncated"] is True
 
 

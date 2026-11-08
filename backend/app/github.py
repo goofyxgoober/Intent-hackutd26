@@ -32,6 +32,42 @@ def check_path(path: str) -> str:
     return path
 
 
+_HUNK = re.compile(r"^@@ -(\d+)(?:,\d+)? \+(\d+)(?:,\d+)? @@")
+
+
+def _ranges(lines: "list[int]") -> "list[list[int]]":
+    out: "list[list[int]]" = []
+    for n in lines:
+        if out and n == out[-1][1] + 1:
+            out[-1][1] = n
+        else:
+            out.append([n, n])
+    return out
+
+
+def changed_lines(patch: Optional[str]) -> dict:
+    """Line numbers a patch touches: `added` in the new file, `removed` in the old one."""
+    added: "list[int]" = []
+    removed: "list[int]" = []
+    old = new = 0
+    for line in (patch or "").split("\n"):
+        m = _HUNK.match(line)
+        if m:
+            old, new = int(m.group(1)), int(m.group(2))
+        elif line.startswith("+"):
+            added.append(new)
+            new += 1
+        elif line.startswith("-"):
+            removed.append(old)
+            old += 1
+        elif line.startswith("\\"):
+            continue  # "\ No newline at end of file"
+        elif old or new:
+            old += 1
+            new += 1
+    return {"added": _ranges(added), "removed": _ranges(removed)}
+
+
 def file_change(f: dict) -> dict:
     """One changed file from a GitHub commit or compare response."""
     changes = f.get("changes", f.get("additions", 0) + f.get("deletions", 0))
@@ -42,6 +78,7 @@ def file_change(f: dict) -> dict:
         "additions": f.get("additions", 0),
         "deletions": f.get("deletions", 0),
         "patch": f.get("patch"),
+        "changed_lines": changed_lines(f.get("patch")),
         # GitHub drops the patch for very large or binary files; fetch /diff instead.
         "patch_truncated": f.get("patch") is None and changes > 0,
     }

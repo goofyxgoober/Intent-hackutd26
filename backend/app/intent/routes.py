@@ -289,6 +289,31 @@ def codebase_view(wa=WA) -> dict:
     }
 
 
+@router.get("/sync/status")
+def sync_status(wa=WA) -> dict:
+    """Is this repo being watched, and when was it last checked?"""
+    ws = _store(wa)[2]
+    return {**sync.polling_status(ws.id), "last_synced_sha": ws.last_synced_sha}
+
+
+@router.get("/sync/latest")
+def latest_change(wa=WA) -> Optional[dict]:
+    """The most recent batch that changed files (commits, files, changed line numbers, diffs), or null."""
+    ws = _store(wa)[2]
+    for b in sync.list_batches(ws.id, limit=20):
+        if not b.get("initial") and b.get("files"):
+            return b
+    return None
+
+
+@router.post("/sync/check")
+async def check_now(wa=WA) -> dict:
+    """Poll once immediately instead of waiting for the next interval."""
+    ws = _store(wa)[2]
+    batch = await sync.check_once(ws.id)
+    return {"changed": batch is not None, "batch": batch, **sync.polling_status(ws.id)}
+
+
 @router.get("/sync/batches")
 def batches(status: Optional[str] = None, limit: int = 20, wa=WA) -> List[dict]:
     return sync.list_batches(_store(wa)[2].id, status, limit)

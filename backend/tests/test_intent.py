@@ -497,3 +497,61 @@ def test_websocket_streams_workspace_events(c, tree):
         assert ws.receive_json()["type"] == "claim.created"
     with c.websocket_connect(f"/ws/workspaces/{c.wid}?key={KEYS['test_runner']}") as ws:
         assert ws.receive_json()["you"] == "test_runner"
+
+
+# ---------------------------------------------------------------- polling
+
+
+def test_poller_syncs_new_commits_with_changed_lines(c, gh, monkeypatch):
+    from app import sync
+
+    c.post(f"/api/repos/{REPO}/sync")  # baseline at BASE_SHA
+    monkeypatch.setattr(settings, "poll_interval_seconds", 0.1)
+    sync.stop_all()
+    c.get(url(c))  # any use of the workspace (re)starts its poller
+    time.sleep(0.3)
+    status = c.get(url(c, "/sync/status")).json()
+    assert status["polling"] is True and status["last_seen_head"] == BASE_SHA
+    assert c.get(url(c, "/sync/latest")).json() is None  # nothing changed yet
+
+    gh.head = HEAD_SHA  # someone pushes
+    deadline = time.time() + 3
+    while time.time() < deadline and c.get(url(c, "/sync/latest")).json() is None:
+        time.sleep(0.1)
+    latest = c.get(url(c, "/sync/latest")).json()
+    assert latest["source"] == "poll" and latest["base"] == BASE_SHA and latest["head"] == HEAD_SHA
+    session_py = next(f for f in latest["files"] if f["path"] == "src/auth/session.py")
+    assert session_py["changed_lines"] == {"added": [[2, 4]], "removed": [[2, 2]]}
+    assert c.get(url(c)).json()["last_synced_sha"] == HEAD_SHA
+    # the next poll sees no new commit and creates nothing
+    count = len(c.get(url(c, "/sync/batches")).json())
+    time.sleep(0.3)
+    assert len(c.get(url(c, "/sync/batches")).json()) == count
+
+
+def test_check_now_and_idle_stop(c, gh, monkeypatch):
+    from app import sync
+
+    c.post(f"/api/repos/{REPO}/sync")
+    gh.head = HEAD_SHA
+    r = c.post(url(c, "/sync/check")).json()
+    assert r["changed"] is True and r["batch"]["head"] == HEAD_SHA
+    assert c.post(url(c, "/sync/check")).json()["changed"] is False
+
+    monkeypatch.setattr(settings, "poll_interval_seconds", 0.05)
+    monkeypatch.setattr(settings, "poll_idle_stop_seconds", 0)
+    sync.stop_all()
+    c.get(url(c))
+    time.sleep(0.3)
+    # idle, so it stopped (reading /sync/status would count as use and restart it)
+    task = sync._pollers.get(c.wid)
+    assert task is None or task.done()
+
+
+def test_polling_can_be_turned_off(c, monkeypatch):
+    from app import sync
+
+    monkeypatch.setattr(settings, "poll_interval_seconds", 0)
+    sync.stop_all()
+    c.get(url(c))
+    assert c.get(url(c, "/sync/status")).json()["polling"] is False
