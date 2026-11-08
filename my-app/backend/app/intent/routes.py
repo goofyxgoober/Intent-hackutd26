@@ -336,6 +336,24 @@ async def export_folder(wa=WA) -> dict:
                                            settings.intent_branch, settings.intent_folder, store)
 
 
+@router.post("/pipeline")
+async def run_pipeline(wa=WA) -> dict:
+    """Run full 4-step pipeline: pull code, check commit diffs, create requirements/files, start tenet grilling."""
+    store, actor, ws = _store(wa)
+    token = actor.session.access_token if actor.is_user else sync._tokens.get(ws.id)
+    if not token:
+        raise HTTPException(400, "No access token available for pipeline run")
+    from .. import pipeline
+    head = await sync._branch_head(token, ws.full_name, ws.default_branch)
+    return await pipeline.execute_full_pipeline(
+        workspace_id=ws.id,
+        token=token,
+        full_name=ws.full_name,
+        head_sha=head,
+        base_sha=ws.last_synced_sha,
+    )
+
+
 # ---------------------------------------------------------------- live updates
 
 ws_router = APIRouter()

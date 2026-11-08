@@ -242,11 +242,50 @@ async def _process(workspace_id: int, source: str, token: Optional[str], head: O
         return {"base": base, "head": head, "status": "up_to_date", "files": [], "commits": []}
 
     # The Codebase view updates first, always, independent of Jev.
+    from pathlib import Path
+    from . import pipeline
+    repo_dir = Path(settings.data_dir) / "workspaces" / str(workspace_id) / "repo"
+
     if base is None:
-        snapshot = await codebase.snapshot_repo(token, full_name, head)
+        snapshot = await codebase.snapshot_repo(token, full_name, head, extract_dir=repo_dir)
         store.put_imports(snapshot)
-        data = {"initial": True, "files": [], "commits": [], "file_count": len(snapshot["files"]),
+
+        # Check diffs from most recent commit if available
+        init_files, init_commits = [], []
+        try:
+            head_commit = await gh(token, "GET", f"/repos/{full_name}/commits/{head}")
+            if head_commit and "files" in head_commit:
+                from .github import commit_summary, file_change
+                init_files = [file_change(f) for f in head_commit.get("files", [])]
+                init_commits = [commit_summary(head_commit)]
+        except Exception:
+            pass
+
+        # Make codebase requirements/files and start tenet grilling process
+        actor_engine = pipeline.Actor(kind="engine", name="pipeline")
+        for f in snapshot.get("files", []):
+            p = f["path"]
+            if codebase.language(p) and not store.get_annotation(p):
+                src_file = repo_dir / p
+                if src_file.exists():
+                    annot = pipeline.generate_annotations_for_file(p, src_file.read_text(encoding="utf-8", errors="replace"))
+                    store.put_annotation(actor_engine, p, annot)
+
+        req_res = pipeline.generate_requirements_and_tenets(store, snapshot, full_name)
+        grill_info = None
+        if req_res.get("root_id"):
+            grill_state = pipeline.start_tenet_grilling_session(workspace_id, store, req_res["root_id"], full_name)
+            grill_info = {
+                "session_id": grill_state["id"],
+                "tenet_id": grill_state["tenet_id"],
+                "questions_count": len(grill_state["questions"]),
+            }
+
+        data = {"initial": True, "files": init_files, "commits": init_commits, "file_count": len(snapshot["files"]),
                 "changed_leaves": [], "affected_tenets": [], "rerun_claims": [], "orphans": []}
+        if grill_info:
+            data["grill"] = grill_info
+
         batch = _save_batch(workspace_id, None, head, source, "ingested", data, event_ids)
         events.emit(workspace_id, "sync.batch", batch=batch)
         return batch
@@ -254,8 +293,18 @@ async def _process(workspace_id: int, source: str, token: Optional[str], head: O
     cmp = await compare_refs(token, full_name, base, head)
     renames = {f["previous_path"]: f["path"] for f in cmp["files"] if f["status"] == "renamed" and f["previous_path"]}
     store.apply_renames(renames)
-    snapshot = await codebase.snapshot_repo(token, full_name, head)
+    snapshot = await codebase.snapshot_repo(token, full_name, head, extract_dir=repo_dir)
     store.put_imports(snapshot)
+
+    # Update annotations for modified files if not already annotated
+    actor_engine = pipeline.Actor(kind="engine", name="pipeline")
+    for f in cmp["files"]:
+        p = f["path"]
+        if codebase.language(p) and not store.get_annotation(p):
+            src_file = repo_dir / p
+            if src_file.exists():
+                annot = pipeline.generate_annotations_for_file(p, src_file.read_text(encoding="utf-8", errors="replace"))
+                store.put_annotation(actor_engine, p, annot)
 
     changed = [f["path"] for f in cmp["files"]] + list(renames)
     deleted = [f["path"] for f in cmp["files"] if f["status"] == "removed"]

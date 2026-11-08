@@ -123,3 +123,19 @@ async def sync_repo(repo: ConnectedRepo = Depends(connected_repo)) -> dict:
     """Sync now: snapshot the codebase, then create a batch for Jev and the Test Runner."""
     batch = await sync.process(repo.id, source="manual", token=repo.session.access_token)
     return {**(batch or {}), "synced": True}
+
+
+@router.post("/{owner}/{repo}/pipeline")
+async def run_repo_pipeline(repo: ConnectedRepo = Depends(connected_repo)) -> dict:
+    """Run full 4-step pipeline: pull code, check commit diffs, create requirements/files, start tenet grilling."""
+    token = repo.session.access_token
+    full_name = repo.full_name
+    head = await sync._branch_head(token, full_name, repo.default_branch)
+    from . import pipeline
+    return await pipeline.execute_full_pipeline(
+        workspace_id=repo.id,
+        token=token,
+        full_name=full_name,
+        head_sha=head,
+        base_sha=repo.last_synced_sha,
+    )
