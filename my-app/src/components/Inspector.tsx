@@ -4,6 +4,7 @@ import { useState } from "react";
 import type { GraphIndex } from "@/lib/graph/model";
 import { boundaryOf } from "@/lib/graph/model";
 import type { Focus } from "@/lib/focus";
+import { Block, CopyChip, Panel } from "@/components/panel/Panel";
 
 interface Props {
   index: GraphIndex;
@@ -16,32 +17,45 @@ interface Props {
   onOpenTenet?(id: string): void;
 }
 
-function IO({ label, map }: { label: string; map: Record<string, string> }) {
+type Tab = "intent" | "links" | "context";
+
+/** A flow row: a name and its type/meaning. */
+function Flow({ label, map }: { label: string; map: Record<string, string> }) {
   const entries = Object.entries(map);
-  if (!entries.length) return null;
   return (
-    <div>
-      <dt>{label}</dt>
-      <dd>
-        {entries.map(([k, v]) => (
-          <span key={k} className="io">
-            <code>{k}</code> {v}
-          </span>
-        ))}
-      </dd>
+    <div className="pn-flow">
+      <span className="pn-flow-label">{label}</span>
+      {entries.length ? (
+        <ul>
+          {entries.map(([k, v]) => (
+            <li key={k}>
+              <code>{k}</code>
+              <span>{v}</span>
+            </li>
+          ))}
+        </ul>
+      ) : (
+        <em>nothing</em>
+      )}
     </div>
   );
 }
 
 export function Inspector({ index, nodeId, focus, onSelect, onGenerateTests, tenets, onOpenTenet }: Props) {
+  const [tab, setTab] = useState<Tab>("intent");
   const [copied, setCopied] = useState(false);
   const node = index.nodes.get(nodeId);
   if (!node) return null;
 
   const ids = [...index.nodes.keys()];
+  const at = ids.indexOf(nodeId);
+  const go = (d: number) => onSelect(ids[(at + d + ids.length) % ids.length]);
+
   const downstream = (index.out.get(nodeId) ?? []).map((e) => ({ id: e.target, relation: e.relation }));
   const upstream = (index.in.get(nodeId) ?? []).map((e) => ({ id: e.source, relation: e.relation }));
   const external = index.dangling.get(nodeId) ?? [];
+  const nameOf = (id: string) => index.nodes.get(id)?.name ?? id;
+  const linkCount = upstream.length + downstream.length + (tenets?.length ?? 0);
 
   async function copyContext() {
     if (!focus) return;
@@ -54,99 +68,135 @@ export function Inspector({ index, nodeId, focus, onSelect, onGenerateTests, ten
     }
   }
 
-  const DepList = ({ items, empty }: { items: { id: string; relation: string }[]; empty: string }) => (
-    <div className="dependencies">
-      {items.length ? (
-        items.map((d) => (
+  const Chips = ({ items, empty }: { items: { id: string; relation: string }[]; empty: string }) =>
+    items.length ? (
+      <div className="pn-chips">
+        {items.map((d) => (
           <button key={d.id + d.relation} onClick={() => onSelect(d.id)} title={d.relation.replace(/_/g, " ")}>
-            {d.id}
+            <b>{nameOf(d.id)}</b>
+            <small>{d.relation.replace(/_/g, " ")}</small>
           </button>
-        ))
-      ) : (
-        <span>{empty}</span>
-      )}
-    </div>
-  );
+        ))}
+      </div>
+    ) : (
+      <p className="pn-empty">{empty}</p>
+    );
 
   return (
-    <aside className="inspector" aria-label="Intent node inspector">
-      <button className="close-inspector" onClick={() => onSelect(null)} aria-label="Close inspector">
-        ×
-      </button>
-      <span className="eyebrow">
-        INTENT NODE {ids.indexOf(nodeId) + 1}/{ids.length}
-      </span>
-      <h2>{node.name}</h2>
-      <code>{node.node_id}</code>
-      <dl>
-        <div>
-          <dt>source</dt>
-          <dd>{node.source_file}</dd>
-        </div>
-        <div>
-          <dt>intent</dt>
-          <dd>{node.intent_summary}</dd>
-        </div>
-        <div>
-          <dt>boundary</dt>
-          <dd>{boundaryOf(node)}</dd>
-        </div>
-        <IO label="inputs" map={node.inputs} />
-        <IO label="outputs" map={node.outputs} />
-      </dl>
-
-      <h3>Business invariants</h3>
-      {node.business_invariants.length ? (
-        <ol>
-          {node.business_invariants.map((item) => (
-            <li key={item}>{item}</li>
-          ))}
-        </ol>
-      ) : (
-        <p className="muted">none mapped</p>
-      )}
-
-      {tenets?.length ? (
+    <Panel
+      label="Intent node inspector"
+      eyebrow={
         <>
-          <h3>Constrained by tenets</h3>
-          <div className="dependencies">
-            {tenets.map((t) => (
-              <button key={t.id} onClick={() => onOpenTenet?.(t.id)} title={`${t.rollup}: open in tenet hierarchy`}>
-                {t.name}
-              </button>
-            ))}
-          </div>
+          <i className="pn-dot" /> intent node
         </>
-      ) : null}
-
-      <h3>Downstream dependencies</h3>
-      <DepList items={downstream} empty="terminal boundary" />
-      {external.length ? (
-        <div className="dependencies external">
-          {external.map((id) => (
-            <span key={id} title="referenced but not in the graph">
-              {id} ↗
+      }
+      title={node.name}
+      sub={<CopyChip text={node.source_file} />}
+      tabs={[
+        { id: "intent", label: "Intent", count: node.business_invariants.length },
+        { id: "links", label: "Links", count: linkCount },
+        { id: "context", label: "Context" },
+      ]}
+      tab={tab}
+      onTab={(t) => setTab(t as Tab)}
+      onClose={() => onSelect(null)}
+      step={{ onPrev: () => go(-1), onNext: () => go(1), position: `${at + 1}/${ids.length}` }}
+      footer={
+        <button className="pn-cta" onClick={() => onGenerateTests(nodeId)}>
+          <span>Generate invariant tests</span>
+          <i aria-hidden>→</i>
+        </button>
+      }
+    >
+      {tab === "intent" ? (
+        <>
+          <p className="pn-lead">{node.intent_summary}</p>
+          <div className="pn-meta">
+            <span className="pn-badge" title="architectural boundary">
+              ⬡ {boundaryOf(node)}
             </span>
-          ))}
-        </div>
-      ) : null}
+            <small>{node.node_id}</small>
+          </div>
 
-      <h3>Depended on by</h3>
-      <DepList items={upstream} empty="entry point" />
+          <Block title="Business invariants" aside={node.business_invariants.length ? `${node.business_invariants.length} rules` : undefined}>
+            {node.business_invariants.length ? (
+              <ol className="pn-rules">
+                {node.business_invariants.map((item, i) => (
+                  <li key={item} style={{ ["--i" as string]: i }}>
+                    <span>{i + 1}</span>
+                    <p>{item}</p>
+                  </li>
+                ))}
+              </ol>
+            ) : (
+              <p className="pn-empty">No invariants mapped yet.</p>
+            )}
+          </Block>
 
-      {focus ? (
-        <>
-          <h3>Retrieved context</h3>
-          <p className="context-meta">
-            {focus.nodeIds.size} nodes · ~{focus.tokens} tokens
-            <button onClick={copyContext}>{copied ? "copied ✓" : "copy"}</button>
-          </p>
+          <Block title="Data in and out">
+            <div className="pn-io">
+              <Flow label="in" map={node.inputs} />
+              <span className="pn-arrow" aria-hidden>→</span>
+              <Flow label="out" map={node.outputs} />
+            </div>
+          </Block>
         </>
       ) : null}
 
-      <button className="generate" onClick={() => onGenerateTests(nodeId)}>
-        generate invariant tests
-      </button>
-    </aside>
+      {tab === "links" ? (
+        <>
+          <Block title="Depends on" aside={downstream.length || undefined}>
+            <Chips items={downstream} empty="Terminal boundary. Nothing downstream." />
+            {external.length ? (
+              <div className="pn-chips ext">
+                {external.map((id) => (
+                  <span key={id} title="referenced but not in the graph">
+                    {id} ↗
+                  </span>
+                ))}
+              </div>
+            ) : null}
+          </Block>
+          <Block title="Used by" aside={upstream.length || undefined}>
+            <Chips items={upstream} empty="Entry point. Nothing calls it." />
+          </Block>
+          {tenets?.length ? (
+            <Block title="Constrained by tenets" aside={tenets.length}>
+              <div className="pn-chips tenet">
+                {tenets.map((t) => (
+                  <button key={t.id} onClick={() => onOpenTenet?.(t.id)} title={`${t.rollup}: open in tenet hierarchy`}>
+                    <b>{t.name}</b>
+                    <small>{t.rollup}</small>
+                  </button>
+                ))}
+              </div>
+            </Block>
+          ) : null}
+        </>
+      ) : null}
+
+      {tab === "context" ? (
+        focus ? (
+          <Block title="Retrieved context">
+            <div className="pn-gauge">
+              <div>
+                <b>{focus.nodeIds.size}</b>
+                <small>nodes pulled in</small>
+              </div>
+              <div>
+                <b>~{focus.tokens}</b>
+                <small>tokens</small>
+              </div>
+            </div>
+            <p className="pn-note">The slice of the graph an agent gets when it works on this node.</p>
+            <button className="pn-ghost" onClick={() => void copyContext()}>
+              {copied ? "Copied ✓" : "Copy context"}
+            </button>
+          </Block>
+        ) : (
+          <p className="pn-empty">No context retrieved for this node yet.</p>
+        )
+      ) : null}
+    </Panel>
   );
 }
