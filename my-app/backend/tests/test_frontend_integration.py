@@ -144,3 +144,49 @@ def test_node_details_and_blast_radius():
     assert "direct_dependencies" in blast
     assert "total_downstream_blast_radius" in blast
     assert blast["total_downstream_blast_radius"] >= 1
+
+
+def test_session_persistence_across_memory_wipe():
+    """Verify that user sessions persist in SQLite and survive memory cache flushes (e.g. server reloads)."""
+    from app import db, sessions
+    from app.config import settings
+
+    # 1. Create a user and session
+    user = {"id": 9999, "login": "test-resilient-user", "avatar_url": "https://example.com/avatar.png"}
+    user_id = db.upsert_user(user["id"], user["login"])
+    sid = sessions.create_session("dev_test_token", user, user_id)
+
+    # Verify session is retrievable
+    s1 = sessions.get_session(sid)
+    assert s1 is not None
+    assert s1.user["login"] == "test-resilient-user"
+
+    # 2. Simulate server reload / process restart by clearing the in-memory dict
+    sessions._sessions.clear()
+    assert sid not in sessions._sessions
+
+    # 3. get_session must rehydrate from SQLite
+    s2 = sessions.get_session(sid)
+    assert s2 is not None
+    assert s2.user["login"] == "test-resilient-user"
+    assert s2.user_id == user_id
+
+    # 4. HTTP client with session cookie must succeed on /auth/me
+    auth_client = TestClient(app, cookies={settings.session_cookie: sid})
+    res = auth_client.get("/auth/me")
+    assert res.status_code == 200
+    assert res.json()["login"] == "test-resilient-user"
+
+    # 5. Connect repo and access workspace tree
+    res_conn = auth_client.post("/api/repos/test-owner/test-repo/connect")
+    assert res_conn.status_code == 200
+    ws_id = res_conn.json()["id"]
+
+    # Clear memory again to simulate reload during pipeline execution
+    sessions._sessions.clear()
+
+    # Workspace tree must remain accessible
+    res_tree = auth_client.get(f"/api/workspaces/{ws_id}/tree")
+    assert res_tree.status_code == 200
+    assert "tenets" in res_tree.json()
+

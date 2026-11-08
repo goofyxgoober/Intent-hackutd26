@@ -49,6 +49,13 @@ CREATE TABLE IF NOT EXISTS sync_batches (
     created_at  REAL NOT NULL,
     reviewed_at REAL
 );
+CREATE TABLE IF NOT EXISTS sessions (
+    sid          TEXT PRIMARY KEY,
+    access_token TEXT NOT NULL,
+    user_data    TEXT NOT NULL,
+    user_id      INTEGER NOT NULL REFERENCES users(id) ON DELETE CASCADE,
+    created_at   REAL NOT NULL
+);
 """
 
 
@@ -70,6 +77,9 @@ def connect() -> Iterator[sqlite3.Connection]:
 def init_db() -> None:
     with connect() as conn:
         conn.executescript(SCHEMA)
+
+
+init_db()
 
 
 def upsert_user(github_id: int, login: str) -> int:
