@@ -25,6 +25,15 @@ and the intent engine package (`intentflow/`).
    Routes: `/` (intent graph + terminal), `/login`, `/dashboard` (repo picker), `/repos/:owner/:repo` (sync, history, tenets).
 4. Tests: `npm run test:api` (pytest, see `pytest.ini`).
 
+### Sign-in rules
+Every session belongs to the GitHub account that signed in through the OAuth app; there is no
+shared, server-wide or hard-coded GitHub account. Without `GITHUB_CLIENT_ID` the login page says
+`github_not_configured`. For local work without an OAuth app, set `ALLOW_DEV_LOGIN=true` in
+`backend/.env` to enable `/auth/dev/login` (a placeholder `dev-user`); keep it off anywhere shared.
+
+Maintenance script: `python3 backend/scripts/regenerate_workspace_annotations.py <workspace_id>`
+re-annotates a connected repo with Nemotron and rebuilds its tenets (ids come from `GET /api/repos`).
+
 ### Two-factor authentication
 Sign-in is GitHub OAuth. GitHub asks for the user's 2FA code during login, and the
 backend also rejects any account that doesn't have 2FA turned on

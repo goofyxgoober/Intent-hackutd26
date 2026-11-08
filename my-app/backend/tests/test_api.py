@@ -178,6 +178,30 @@ def test_error_responses_carry_codes(fake):
         assert c.get("/no/such/route").json()["code"] == "NOT_FOUND"
 
 
+def test_dev_login_is_off_by_default(fake):
+    with TestClient(app, follow_redirects=False) as c:
+        assert c.get("/auth/dev/login").status_code == 404
+        assert c.post("/auth/dev/login").status_code == 404
+        assert c.get("/auth/me").status_code == 401
+
+
+def test_dev_login_only_with_explicit_flag(fake, monkeypatch):
+    monkeypatch.setattr(settings, "allow_dev_login", True)
+    with TestClient(app, follow_redirects=False) as c:
+        assert c.get("/auth/dev/login").headers["location"].endswith("/dashboard")
+        assert c.get("/auth/me").json()["login"] == "dev-user"
+
+
+def test_no_shared_or_url_token_login(fake, monkeypatch):
+    """Without an OAuth app nobody is signed in as the server's GitHub account or a fake user."""
+    monkeypatch.setattr(settings, "github_client_id", "")
+    monkeypatch.setenv("GITHUB_TOKEN", "ghp_server_owners_token")
+    with TestClient(app, follow_redirects=False) as c:
+        r = c.get("/auth/github/login", params={"token": "ghp_someone_elses_token"})
+        assert r.headers["location"].endswith("/login?error=github_not_configured")
+        assert c.get("/auth/me").status_code == 401
+
+
 def test_2fa_check_can_be_disabled(fake, monkeypatch):
     fake.two_factor = False
     monkeypatch.setattr(settings, "require_2fa", False)

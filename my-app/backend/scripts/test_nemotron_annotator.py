@@ -89,8 +89,16 @@ Respond ONLY with the JSON object. Do not wrap in markdown quotes if possible.""
     return None
 
 if __name__ == "__main__":
-    test_file = "my-app/data/workspaces/9/repo/src/layout/DagreNodePositioning.tsx"
-    test_content = Path(test_file).read_text(encoding="utf-8")
-    result = annotate_file_with_nemotron("src/layout/DagreNodePositioning.tsx", test_content)
+    import argparse
+
+    parser = argparse.ArgumentParser(
+        description="Annotate one source file with Nemotron and print the result.",
+        epilog="Example: python3 backend/scripts/test_nemotron_annotator.py src/app.ts --repo-dir data/workspaces/3/repo",
+    )
+    parser.add_argument("path", help="file path inside the repo, e.g. src/layout/Graph.tsx")
+    parser.add_argument("--repo-dir", default=".", help="folder the path is relative to (default: current folder)")
+    args = parser.parse_args()
+    test_content = (Path(args.repo_dir) / args.path).read_text(encoding="utf-8")
+    result = annotate_file_with_nemotron(args.path, test_content)
     print("RESULT:")
     print(json.dumps(result, indent=2))

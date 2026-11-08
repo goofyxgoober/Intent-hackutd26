@@ -20,6 +20,9 @@ class Settings:
     cookie_secure: bool = _bool("COOKIE_SECURE", "false")
     # Only let in GitHub accounts that have two-factor authentication turned on.
     require_2fa: bool = _bool("REQUIRE_GITHUB_2FA", "true")
+    # Local development only: lets /auth/dev/login sign in as a placeholder "dev-user"
+    # without GitHub. Off by default; never enable it on a shared or deployed server.
+    allow_dev_login: bool = _bool("ALLOW_DEV_LOGIN", "false")
     database_path: str = os.getenv("DATABASE_PATH", "intentflow.db")
     webhook_secret: str = os.getenv("GITHUB_WEBHOOK_SECRET", "")
     intent_branch: str = os.getenv("INTENT_BRANCH", "intentflow/intents")

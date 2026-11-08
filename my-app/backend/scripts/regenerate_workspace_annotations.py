@@ -1,4 +1,12 @@
-import os
+"""Re-annotate a workspace's repo with Nemotron and rebuild its tenets and claims.
+
+Usage (from my-app/):
+    python3 backend/scripts/regenerate_workspace_annotations.py <workspace_id>
+
+The workspace id is shown by GET /api/repos (field "id"); the repo name is read
+from the database, so nothing here is tied to a particular GitHub account.
+"""
+import argparse
 import sys
 import json
 from pathlib import Path
@@ -7,6 +15,7 @@ from concurrent.futures import ThreadPoolExecutor, as_completed
 backend_dir = Path(__file__).resolve().parents[1]
 sys.path.insert(0, str(backend_dir))
 
+from app import db
 from app.intent.store import IntentStore
 from app.pipeline import (
     generate_annotations_for_file,
@@ -14,7 +23,18 @@ from app.pipeline import (
     start_tenet_grilling_session,
 )
 
-ws_id = 9
+parser = argparse.ArgumentParser(description=__doc__, formatter_class=argparse.RawDescriptionHelpFormatter)
+parser.add_argument("workspace_id", type=int, help="workspace (connected repo) id")
+args = parser.parse_args()
+
+ws_id = args.workspace_id
+with db.connect() as conn:
+    row = conn.execute("SELECT full_name FROM repos WHERE id = ?", (ws_id,)).fetchone()
+if row is None:
+    sys.exit(f"No workspace {ws_id}. Connect the repo in the app first; GET /api/repos lists ids.")
+repo_full_name = row["full_name"]
+print(f"Workspace {ws_id}: {repo_full_name}")
+
 ws_dir = backend_dir.parent / "data" / "workspaces" / str(ws_id)
 repo_dir = ws_dir / "repo"
 intent_dir = ws_dir / "intent"
@@ -65,12 +85,12 @@ for sub in ["tenets", "claims", "links", "spec"]:
 # 3. Generate requirements, tenets, claims, spec
 store = IntentStore(ws_id)
 snapshot = {"files": files_list}
-res = generate_requirements_and_tenets(store, snapshot, "goofyxgoober/planner", sources)
+res = generate_requirements_and_tenets(store, snapshot, repo_full_name, sources)
 print(f"Created {len(res.get('created_tenets', []))} tenets")
 print(f"Created {len(res.get('created_claims', []))} claims")
 
 # 4. Start grilling session
-grill_state = start_tenet_grilling_session(ws_id, store, res["root_id"], "goofyxgoober/planner")
+grill_state = start_tenet_grilling_session(ws_id, store, res["root_id"], repo_full_name)
 print(f"Started grilling session: {grill_state['id']} with {len(grill_state['questions'])} questions")
 
 print("\n=== SUCCESSFUL PARALLEL REGENERATION COMPLETE ===")
