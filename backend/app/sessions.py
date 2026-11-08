@@ -6,6 +6,7 @@ restarts.
 """
 import secrets
 import time
+from typing import Optional
 from dataclasses import dataclass, field
 
 from .config import settings
@@ -31,7 +32,7 @@ def create_session(access_token: str, user: dict) -> str:
     return sid
 
 
-def get_session(sid: str | None) -> Session | None:
+def get_session(sid: Optional[str]) -> Optional[Session]:
     if not sid:
         return None
     session = _sessions.get(sid)
@@ -41,6 +42,6 @@ def get_session(sid: str | None) -> Session | None:
     return session
 
 
-def delete_session(sid: str | None) -> None:
+def delete_session(sid: Optional[str]) -> None:
     if sid:
         _sessions.pop(sid, None)

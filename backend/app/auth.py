@@ -1,4 +1,5 @@
 import secrets
+from typing import Optional
 from urllib.parse import urlencode
 
 import httpx
@@ -63,9 +64,9 @@ def github_login() -> RedirectResponse:
 @router.get("/github/callback")
 async def github_callback(
     request: Request,
-    code: str | None = None,
-    state: str | None = None,
-    error: str | None = None,
+    code: Optional[str] = None,
+    state: Optional[str] = None,
+    error: Optional[str] = None,
 ) -> RedirectResponse:
     if error:
         return _login_error(error)
