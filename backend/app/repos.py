@@ -10,6 +10,7 @@ from fastapi import APIRouter, Depends, HTTPException, Response
 from . import db
 from .auth import require_session
 from .config import settings
+from .github import check_ref, compare_refs, list_commits
 from .github_client import gh
 from .models import IntentGraphIn, IntentNode
 from .sessions import Session
@@ -102,27 +103,17 @@ def disconnect_repo(repo: ConnectedRepo = Depends(connected_repo)) -> Response:
 
 async def _changes(repo: ConnectedRepo, ref: Optional[str]) -> dict:
     token = repo.session.access_token
-    head_ref = ref or repo.default_branch
+    head_ref = check_ref(ref or repo.default_branch)
     head = await gh(token, "GET", f"/repos/{repo.full_name}/commits/{head_ref}")
     head_sha = head["sha"]
 
     if repo.last_synced_sha is None:
-        return {"base": None, "head": head_sha, "initial_sync": True, "files": [], "affected_intents": []}
+        return {"base": None, "head": head_sha, "initial_sync": True, "commits": [], "files": [], "affected_intents": []}
     if repo.last_synced_sha == head_sha:
-        return {"base": head_sha, "head": head_sha, "initial_sync": False, "files": [], "affected_intents": []}
+        return {"base": head_sha, "head": head_sha, "initial_sync": False, "commits": [], "files": [], "affected_intents": []}
 
-    cmp = await gh(token, "GET", f"/repos/{repo.full_name}/compare/{repo.last_synced_sha}...{head_sha}")
-    files = [
-        {
-            "path": f["filename"],
-            "previous_path": f.get("previous_filename"),
-            "status": f["status"],
-            "additions": f.get("additions", 0),
-            "deletions": f.get("deletions", 0),
-            "patch": f.get("patch"),
-        }
-        for f in cmp.get("files", [])
-    ]
+    cmp = await compare_refs(token, repo.full_name, repo.last_synced_sha, head_sha)
+    files = cmp["files"]
     paths = {f["path"] for f in files} | {f["previous_path"] for f in files if f["previous_path"]}
     with db.connect() as conn:
         affected = db.intents_for_paths(conn, repo.id, paths)
@@ -130,9 +121,8 @@ async def _changes(repo: ConnectedRepo, ref: Optional[str]) -> dict:
         "base": repo.last_synced_sha,
         "head": head_sha,
         "initial_sync": False,
-        "commits_behind": cmp.get("ahead_by", 0),
-        # GitHub's compare API lists at most 300 files.
-        "truncated": len(files) >= 300,
+        "commits": cmp["commits"],
+        "truncated": cmp["truncated"],
         "files": files,
         "affected_intents": affected,
     }
@@ -250,6 +240,18 @@ def put_intent(
             "SELECT * FROM intent_nodes WHERE repo_id = ? AND node_id = ?", (repo.id, node_id)
         ).fetchone()
     return _node_out(row)
+
+
+@router.get("/{owner}/{repo}/intents/{node_id}/history")
+async def intent_history(
+    node_id: str, limit: int = 20, repo: ConnectedRepo = Depends(connected_repo)
+) -> dict:
+    """Commits that touched the source file behind this intent."""
+    node = get_intent(node_id, repo)
+    commits = await list_commits(
+        repo.session.access_token, repo.full_name, repo.default_branch, node["source_file"], limit
+    )
+    return {"node_id": node_id, "source_file": node["source_file"], "commits": commits}
 
 
 @router.delete("/{owner}/{repo}/intents/{node_id}", status_code=204)

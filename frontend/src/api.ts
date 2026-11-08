@@ -40,6 +40,34 @@ export interface ChangedFile {
   additions: number;
   deletions: number;
   patch: string | null;
+  patch_truncated?: boolean;
+}
+
+export interface CommitSummary {
+  sha: string;
+  message: string;
+  author: string;
+  avatar_url: string | null;
+  date: string;
+  html_url: string | null;
+}
+
+export interface CommitDetail extends CommitSummary {
+  full_message: string;
+  parents: string[];
+  stats: { total?: number; additions?: number; deletions?: number };
+  files: ChangedFile[];
+}
+
+export interface Comparison {
+  base: string;
+  head: string;
+  status: string;
+  ahead_by: number;
+  behind_by: number;
+  commits: CommitSummary[];
+  truncated: boolean;
+  files: ChangedFile[];
 }
 
 export interface Changes {
@@ -47,6 +75,7 @@ export interface Changes {
   head: string;
   initial_sync: boolean;
   files: ChangedFile[];
+  commits: CommitSummary[];
   affected_intents: string[];
   stale_marked?: number;
 }

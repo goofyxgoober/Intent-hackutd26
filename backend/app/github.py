@@ -1,8 +1,10 @@
 """Read-only views of the user's GitHub repositories (no database needed)."""
 import base64
+import re
 from typing import Optional
 
 from fastapi import APIRouter, Depends, HTTPException
+from fastapi.responses import PlainTextResponse
 
 from .auth import require_session
 from .github_client import gh
@@ -11,6 +13,78 @@ from .sessions import Session
 router = APIRouter(prefix="/api/github", tags=["github"])
 
 MAX_FILE_BYTES = 1_000_000
+MAX_DIFF_BYTES = 5_000_000
+# Branch names, tags and SHAs. Git forbids ".." in ref names, which also keeps
+# a ref from walking to another API path.
+_REF = re.compile(r"^[A-Za-z0-9._/\-]{1,250}$")
+
+
+def check_ref(ref: str) -> str:
+    if not _REF.match(ref) or ".." in ref or ref.startswith("/"):
+        raise HTTPException(422, f"Not a valid branch, tag or commit: {ref!r}")
+    return ref
+
+
+def check_path(path: str) -> str:
+    parts = path.split("/")
+    if not path or path.startswith("/") or any(p in ("", ".", "..") for p in parts):
+        raise HTTPException(422, f"Not a valid file path: {path!r}")
+    return path
+
+
+def file_change(f: dict) -> dict:
+    """One changed file from a GitHub commit or compare response."""
+    changes = f.get("changes", f.get("additions", 0) + f.get("deletions", 0))
+    return {
+        "path": f["filename"],
+        "previous_path": f.get("previous_filename"),
+        "status": f["status"],
+        "additions": f.get("additions", 0),
+        "deletions": f.get("deletions", 0),
+        "patch": f.get("patch"),
+        # GitHub drops the patch for very large or binary files; fetch /diff instead.
+        "patch_truncated": f.get("patch") is None and changes > 0,
+    }
+
+
+def commit_summary(c: dict) -> dict:
+    author = c.get("author") or {}
+    return {
+        "sha": c["sha"],
+        "message": c["commit"]["message"].split("\n", 1)[0],
+        "author": author.get("login") or c["commit"]["author"]["name"],
+        "avatar_url": author.get("avatar_url"),
+        "date": c["commit"]["author"]["date"],
+        "html_url": c.get("html_url"),
+    }
+
+
+async def list_commits(
+    token: str, full_name: str, ref: Optional[str] = None, path: Optional[str] = None, limit: int = 20
+) -> "list[dict]":
+    params: dict = {"per_page": max(1, min(limit, 100))}
+    if ref:
+        params["sha"] = check_ref(ref)
+    if path:
+        params["path"] = check_path(path)
+    commits = await gh(token, "GET", f"/repos/{full_name}/commits", params=params)
+    return [commit_summary(c) for c in commits]
+
+
+async def compare_refs(token: str, full_name: str, base: str, head: str) -> dict:
+    cmp = await gh(token, "GET", f"/repos/{full_name}/compare/{check_ref(base)}...{check_ref(head)}")
+    files = [file_change(f) for f in cmp.get("files", [])]
+    return {
+        "base": base,
+        "head": head,
+        "status": cmp.get("status"),
+        "ahead_by": cmp.get("ahead_by", 0),
+        "behind_by": cmp.get("behind_by", 0),
+        "commits": [commit_summary(c) for c in cmp.get("commits", [])],
+        # GitHub's compare API lists at most 300 files.
+        "truncated": len(files) >= 300,
+        "files": files,
+    }
 
 
 @router.get("/repos")
@@ -33,6 +107,14 @@ async def list_repos(session: Session = Depends(require_session)) -> "list[dict]
     ]
 
 
+@router.get("/repos/{owner}/{repo}/branches")
+async def list_branches(owner: str, repo: str, session: Session = Depends(require_session)) -> "list[dict]":
+    branches = await gh(
+        session.access_token, "GET", f"/repos/{owner}/{repo}/branches", params={"per_page": 100}
+    )
+    return [{"name": b["name"], "sha": b["commit"]["sha"]} for b in branches]
+
+
 @router.get("/repos/{owner}/{repo}/tree")
 async def repo_tree(
     owner: str, repo: str, ref: Optional[str] = None, session: Session = Depends(require_session)
@@ -41,7 +123,8 @@ async def repo_tree(
     if ref is None:
         ref = (await gh(session.access_token, "GET", f"/repos/{owner}/{repo}"))["default_branch"]
     tree = await gh(
-        session.access_token, "GET", f"/repos/{owner}/{repo}/git/trees/{ref}", params={"recursive": "1"}
+        session.access_token, "GET", f"/repos/{owner}/{repo}/git/trees/{check_ref(ref)}",
+        params={"recursive": "1"},
     )
     files = [
         {"path": t["path"], "size": t.get("size", 0), "sha": t["sha"]}
@@ -57,8 +140,10 @@ async def repo_file(
     session: Session = Depends(require_session),
 ) -> dict:
     """Contents of one text file."""
-    params = {"ref": ref} if ref else None
-    item = await gh(session.access_token, "GET", f"/repos/{owner}/{repo}/contents/{path}", params=params)
+    params = {"ref": check_ref(ref)} if ref else None
+    item = await gh(
+        session.access_token, "GET", f"/repos/{owner}/{repo}/contents/{check_path(path)}", params=params
+    )
     if isinstance(item, list) or item.get("type") != "file":
         raise HTTPException(400, f"{path} is a directory, not a file")
     if item.get("size", 0) > MAX_FILE_BYTES or not item.get("content"):
@@ -73,19 +158,49 @@ async def repo_file(
 
 @router.get("/repos/{owner}/{repo}/commits")
 async def repo_commits(
-    owner: str, repo: str, ref: Optional[str] = None, limit: int = 20,
+    owner: str, repo: str, ref: Optional[str] = None, path: Optional[str] = None, limit: int = 20,
     session: Session = Depends(require_session),
 ) -> "list[dict]":
-    params = {"per_page": max(1, min(limit, 100))}
-    if ref:
-        params["sha"] = ref
-    commits = await gh(session.access_token, "GET", f"/repos/{owner}/{repo}/commits", params=params)
-    return [
-        {
-            "sha": c["sha"],
-            "message": c["commit"]["message"].split("\n", 1)[0],
-            "author": (c.get("author") or {}).get("login") or c["commit"]["author"]["name"],
-            "date": c["commit"]["author"]["date"],
-        }
-        for c in commits
-    ]
+    """Commit history, newest first. Pass `path` for the history of one file."""
+    return await list_commits(session.access_token, f"{owner}/{repo}", ref, path, limit)
+
+
+@router.get("/repos/{owner}/{repo}/commits/{sha}")
+async def commit_detail(
+    owner: str, repo: str, sha: str, session: Session = Depends(require_session)
+) -> dict:
+    """One commit with every file it changed and each file's diff."""
+    c = await gh(session.access_token, "GET", f"/repos/{owner}/{repo}/commits/{check_ref(sha)}")
+    return {
+        **commit_summary(c),
+        "full_message": c["commit"]["message"],
+        "parents": [p["sha"] for p in c.get("parents", [])],
+        "stats": c.get("stats", {}),
+        "files": [file_change(f) for f in c.get("files", [])],
+    }
+
+
+@router.get("/repos/{owner}/{repo}/compare")
+async def compare(
+    owner: str, repo: str, base: str, head: str, session: Session = Depends(require_session)
+) -> dict:
+    """Commits and file diffs between any two branches, tags or commits."""
+    return await compare_refs(session.access_token, f"{owner}/{repo}", base, head)
+
+
+@router.get("/repos/{owner}/{repo}/diff", response_class=PlainTextResponse)
+async def raw_diff(
+    owner: str, repo: str, sha: Optional[str] = None, base: Optional[str] = None,
+    head: Optional[str] = None, session: Session = Depends(require_session),
+) -> PlainTextResponse:
+    """Full unified diff, including files GitHub leaves out of the JSON. Use `sha`, or `base` and `head`."""
+    if sha:
+        path = f"/repos/{owner}/{repo}/commits/{check_ref(sha)}"
+    elif base and head:
+        path = f"/repos/{owner}/{repo}/compare/{check_ref(base)}...{check_ref(head)}"
+    else:
+        raise HTTPException(422, "Pass either sha, or both base and head")
+    text = await gh(session.access_token, "GET", path, raw_diff=True)
+    if len(text.encode()) > MAX_DIFF_BYTES:
+        raise HTTPException(413, "Diff is larger than 5 MB")
+    return PlainTextResponse(text)

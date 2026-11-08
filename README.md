@@ -38,7 +38,11 @@ in SQLite (`DATABASE_PATH`, default `backend/intentflow.db`).
 | GET | `/api/github/repos` | Repos the user can access |
 | GET | `/api/github/repos/{owner}/{repo}/tree?ref=` | All file paths |
 | GET | `/api/github/repos/{owner}/{repo}/file?path=&ref=` | One file's text |
-| GET | `/api/github/repos/{owner}/{repo}/commits` | Recent commits |
+| GET | `/api/github/repos/{owner}/{repo}/branches` | Branch names and head SHAs |
+| GET | `/api/github/repos/{owner}/{repo}/commits?ref=&path=&limit=` | Commit history; `path` gives one file's history |
+| GET | `/api/github/repos/{owner}/{repo}/commits/{sha}` | One commit with every changed file and its diff |
+| GET | `/api/github/repos/{owner}/{repo}/compare?base=&head=` | Commits and file diffs between any two branches, tags or SHAs |
+| GET | `/api/github/repos/{owner}/{repo}/diff?sha=` or `?base=&head=` | Full unified diff as text, for files GitHub leaves out of the JSON |
 | GET | `/api/repos` | Repos this user connected |
 | POST | `/api/repos/{owner}/{repo}/connect` | Connect a repo (checks access) |
 | DELETE | `/api/repos/{owner}/{repo}` | Disconnect and delete its intents |
@@ -46,10 +50,15 @@ in SQLite (`DATABASE_PATH`, default `backend/intentflow.db`).
 | POST | `/api/repos/{owner}/{repo}/sync` | Accept current head; flags intents on modified files `stale` |
 | GET | `/api/repos/{owner}/{repo}/activity` | File changes received by the webhook |
 | GET | `/api/repos/{owner}/{repo}/intents?stale=&source_file=` | List intent nodes |
+| GET | `/api/repos/{owner}/{repo}/intents/{node_id}/history` | Commits that touched the intent's source file |
 | GET/PUT/DELETE | `/api/repos/{owner}/{repo}/intents/{node_id}` | Read / upsert / delete one node. PUT takes `?expected_version=` and returns 409 on a conflicting edit |
 | GET/PUT | `/api/repos/{owner}/{repo}/graph` | Whole IntentGraph; PUT replaces it (for the intent engine) |
 | POST | `/api/repos/{owner}/{repo}/intents/export` | Commit the graph to `.intentflow/intent_graph.json` on branch `intentflow/intents` |
 | POST | `/webhooks/github` | GitHub push webhook (HMAC-verified) |
+
+Changed files come back as `{path, previous_path, status, additions, deletions, patch, patch_truncated}`.
+When `patch_truncated` is true GitHub skipped that file's diff (too large or binary); use `/diff`.
+Refs and paths are validated so they can't reach other GitHub API routes.
 
 Intent nodes follow the `IntentNode` schema in CONTEXT.md. `downstream_dependencies`
 become `depends_on` edges automatically. Saving a node clears its `stale` flag.

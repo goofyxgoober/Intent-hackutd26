@@ -1,8 +1,9 @@
-import { useCallback, useEffect, useState } from "react";
+import { useCallback, useEffect, useRef, useState } from "react";
 import { Link, useParams } from "react-router-dom";
 import { api, type Changes, type IntentNode } from "../api";
 import { useAuth } from "../auth/AuthContext";
 import { NodeCard, Stages, StatusBar, Terminal, TopBar } from "../components/Chrome";
+import { RepoPanel, type RepoTab } from "../components/RepoPanel";
 
 const blankIntent = (): IntentNode => ({
   node_id: "new_intent",
@@ -29,7 +30,9 @@ export default function Repo() {
   const [intents, setIntents] = useState<IntentNode[] | null>(null);
   const [log, setLog] = useState<{ text: string; tone?: "green" | "red" | "dim" }[]>([]);
   const [editing, setEditing] = useState<{ original: IntentNode | null; text: string } | null>(null);
-  const [openPatch, setOpenPatch] = useState<string | null>(null);
+  const [tab, setTab] = useState<RepoTab>("changes");
+  const [historyPath, setHistoryPath] = useState<string | null>(null);
+  const panelRef = useRef<HTMLDivElement>(null);
   const [busy, setBusy] = useState(false);
 
   const say = (text: string, tone?: "green" | "red" | "dim") =>
@@ -66,6 +69,7 @@ export default function Repo() {
       );
       // Keep showing what this sync covered; the next preview starts from the new head.
       setChanges(r);
+      setTab("changes");
       await loadIntents();
     } catch (e) {
       say(`✗ ${(e as Error).message}`, "red");
@@ -163,38 +167,17 @@ export default function Repo() {
 
       <main className="canvas repo-canvas">
         <section className="col">
-          <NodeCard
-            name={`${owner}/${repo}`}
-            tag={changes ? `head ${changes.head.slice(0, 7)}` : "loading…"}
-            summary={
-              !changes
-                ? "Reading the repository…"
-                : changes.initial_sync
-                  ? "Not synced yet. Sync to set a baseline for tracking changes."
-                  : changes.files.length
-                    ? changes.stale_marked !== undefined
-                      ? `${changes.files.length} files modified in this sync (${changes.base?.slice(0, 7)} → ${changes.head.slice(0, 7)}).`
-                      : `${changes.files.length} files modified since the last sync.`
-                    : "Up to date with the last sync."
-            }
-          >
-            {changes && changes.files.length > 0 && (
-              <ul className="file-list">
-                {changes.files.map((f) => (
-                  <li key={f.path}>
-                    <button className="file-row" onClick={() => setOpenPatch(openPatch === f.path ? null : f.path)}>
-                      <span className={`fstatus ${f.status}`}>{f.status}</span>
-                      <span className="fpath">{f.previous_path ? `${f.previous_path} → ${f.path}` : f.path}</span>
-                      <span className="fdelta">
-                        <span className="green">+{f.additions}</span> <span className="red">−{f.deletions}</span>
-                      </span>
-                    </button>
-                    {openPatch === f.path && <pre className="patch">{f.patch ?? "(no text diff)"}</pre>}
-                  </li>
-                ))}
-              </ul>
-            )}
-          </NodeCard>
+          <div ref={panelRef}>
+            <RepoPanel
+              owner={owner}
+              repo={repo}
+              changes={changes}
+              tab={tab}
+              onTab={setTab}
+              historyPath={historyPath}
+              onHistoryPath={setHistoryPath}
+            />
+          </div>
 
           <div className="section-head">
             <h2 className="hand">functional intents</h2>
@@ -247,12 +230,24 @@ export default function Repo() {
                     <div key={inv}>• {inv}</div>
                   ))}
                 </div>
-                <button
-                  className="link-purple as-button"
-                  onClick={() => setEditing({ original: n, text: JSON.stringify(stripMeta(n), null, 2) })}
-                >
-                  [edit intent]
-                </button>
+                <div className="card-actions">
+                  <button
+                    className="link-purple as-button"
+                    onClick={() => setEditing({ original: n, text: JSON.stringify(stripMeta(n), null, 2) })}
+                  >
+                    [edit intent]
+                  </button>
+                  <button
+                    className="link-purple as-button"
+                    onClick={() => {
+                      setHistoryPath(n.source_file);
+                      setTab("history");
+                      panelRef.current?.scrollIntoView({ behavior: "smooth", block: "start" });
+                    }}
+                  >
+                    [history]
+                  </button>
+                </div>
               </NodeCard>
             ))}
           </div>

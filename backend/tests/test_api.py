@@ -17,6 +17,14 @@ REPO = "acme/legacy"
 BASE_SHA, HEAD_SHA = "a" * 40, "b" * 40
 
 
+def commit(sha: str, message: str) -> dict:
+    return {
+        "sha": sha, "html_url": f"https://github.com/{REPO}/commit/{sha}",
+        "author": {"login": "ayaan", "avatar_url": "https://a"},
+        "commit": {"message": message, "author": {"name": "Ayaan", "date": "2026-11-07T20:00:00Z"}},
+    }
+
+
 class FakeGitHub:
     def __init__(self):
         self.two_factor = True
@@ -48,6 +56,35 @@ class FakeGitHub:
             return httpx.Response(404, json={"message": "Not Found"})
         if p == f"/repos/{REPO}/commits/main":
             return httpx.Response(200, json={"sha": self.head})
+        if p == f"/repos/{REPO}/commits/{HEAD_SHA}":
+            if req.headers["accept"] == "application/vnd.github.diff":
+                return httpx.Response(200, text="diff --git a/big.bin b/big.bin\n")
+            return httpx.Response(200, json={
+                **commit(HEAD_SHA, "Fix session expiry\n\nLonger body."),
+                "parents": [{"sha": BASE_SHA}], "stats": {"total": 4, "additions": 3, "deletions": 1},
+                "files": [
+                    {"filename": "src/auth/session.py", "status": "modified", "additions": 3, "deletions": 1, "changes": 4, "patch": "@@ -1 +1 @@"},
+                    {"filename": "big.bin", "status": "modified", "additions": 0, "deletions": 0, "changes": 900},
+                ],
+            })
+        if p == f"/repos/{REPO}/commits/{'c' * 40}":
+            return httpx.Response(422, json={"message": "No commit found for SHA"})
+        if p == f"/repos/{REPO}/commits":
+            path = req.url.params.get("path")
+            history = [commit(HEAD_SHA, "Fix session expiry"), commit(BASE_SHA, "Initial import")]
+            if path == "src/db/user.py":
+                history = history[1:]
+            return httpx.Response(200, json=history[: int(req.url.params.get("per_page", 30))])
+        if p == f"/repos/{REPO}/branches":
+            return httpx.Response(200, json=[{"name": "main", "commit": {"sha": self.head}}, {"name": "Login", "commit": {"sha": HEAD_SHA}}])
+        if p == f"/repos/{REPO}/compare/main...Login":
+            if req.headers["accept"] == "application/vnd.github.diff":
+                return httpx.Response(200, text="diff --git a/x b/x\n")
+            return httpx.Response(200, json={
+                "status": "ahead", "ahead_by": 1, "behind_by": 0,
+                "commits": [commit(HEAD_SHA, "Fix session expiry")],
+                "files": [{"filename": "src/auth/session.py", "status": "modified", "additions": 3, "deletions": 1, "patch": "@@"}],
+            })
         if p == f"/repos/{REPO}/compare/{BASE_SHA}...{HEAD_SHA}":
             return httpx.Response(200, json={"ahead_by": 1, "files": [
                 {"filename": "src/auth/session.py", "status": "modified", "additions": 3, "deletions": 1, "patch": "@@"},
@@ -170,6 +207,58 @@ def test_tree_and_file(client):
     assert f["content"] == "def check():\n"
 
 
+def test_commit_history_and_file_history(client):
+    history = client.get(f"/api/github/repos/{REPO}/commits").json()
+    assert [c["message"] for c in history] == ["Fix session expiry", "Initial import"]
+    assert history[0]["author"] == "ayaan" and history[0]["html_url"].endswith(HEAD_SHA)
+    one_file = client.get(f"/api/github/repos/{REPO}/commits", params={"path": "src/db/user.py"}).json()
+    assert [c["sha"] for c in one_file] == [BASE_SHA]
+    assert len(client.get(f"/api/github/repos/{REPO}/commits", params={"limit": 1}).json()) == 1
+
+
+def test_commit_detail_includes_diffs(client):
+    c = client.get(f"/api/github/repos/{REPO}/commits/{HEAD_SHA}").json()
+    assert c["message"] == "Fix session expiry" and "Longer body." in c["full_message"]
+    assert c["parents"] == [BASE_SHA] and c["stats"]["total"] == 4
+    session_py, big = c["files"]
+    assert session_py["patch"] == "@@ -1 +1 @@" and session_py["patch_truncated"] is False
+    assert big["patch"] is None and big["patch_truncated"] is True
+
+
+def test_raw_diff_for_truncated_files(client):
+    r = client.get(f"/api/github/repos/{REPO}/diff", params={"sha": HEAD_SHA})
+    assert r.status_code == 200 and r.text.startswith("diff --git a/big.bin")
+    r = client.get(f"/api/github/repos/{REPO}/diff", params={"base": "main", "head": "Login"})
+    assert r.text.startswith("diff --git a/x")
+    assert client.get(f"/api/github/repos/{REPO}/diff").status_code == 422
+
+
+def test_compare_any_two_refs(client):
+    cmp = client.get(f"/api/github/repos/{REPO}/compare", params={"base": "main", "head": "Login"}).json()
+    assert cmp["ahead_by"] == 1 and cmp["status"] == "ahead"
+    assert [c["message"] for c in cmp["commits"]] == ["Fix session expiry"]
+    assert [f["path"] for f in cmp["files"]] == ["src/auth/session.py"]
+    branches = client.get(f"/api/github/repos/{REPO}/branches").json()
+    assert [b["name"] for b in branches] == ["main", "Login"]
+
+
+@pytest.mark.parametrize("ref", ["../../user", "main..Login", "/etc", "a b"])
+def test_rejects_refs_that_could_escape_the_repo(client, ref):
+    assert client.get(f"/api/github/repos/{REPO}/compare", params={"base": ref, "head": "main"}).status_code == 422
+    assert client.get(f"/api/github/repos/{REPO}/commits", params={"ref": ref}).status_code == 422
+
+
+@pytest.mark.parametrize("path", ["../secrets", "src/../../user", "/abs", "a//b"])
+def test_rejects_paths_that_could_escape_the_repo(client, path):
+    assert client.get(f"/api/github/repos/{REPO}/file", params={"path": path}).status_code == 422
+    assert client.get(f"/api/github/repos/{REPO}/commits", params={"path": path}).status_code == 422
+
+
+def test_unknown_commit_is_reported(client):
+    r = client.get(f"/api/github/repos/{REPO}/commits/{'c' * 40}")
+    assert r.status_code == 422 and "No commit found" in r.json()["detail"]
+
+
 # ------------------------------------------------------------------ repos
 
 
@@ -212,6 +301,8 @@ def test_changes_and_sync_flag_stale_intents(client, fake):
     assert client.get(f"/api/repos/{REPO}").json()["last_synced_sha"] == HEAD_SHA
     assert client.get(f"/api/repos/{REPO}/changes").json()["files"] == []
 
+    assert preview["commits"] == []  # the fake compare returns files only
+
     # Re-extracting an intent clears its stale flag.
     client.put(f"/api/repos/{REPO}/intents/validate_session", json=node())
     stale = client.get(f"/api/repos/{REPO}/intents", params={"stale": True}).json()
@@ -246,6 +337,15 @@ def test_intent_crud_versions_and_edges(client):
     assert client.delete(url).status_code == 204
     assert client.get(url).status_code == 404
     assert client.get(f"/api/repos/{REPO}/graph").json()["edges"] == []
+
+
+def test_intent_history_follows_its_source_file(client):
+    client.post(f"/api/repos/{REPO}/connect")
+    client.put(f"/api/repos/{REPO}/intents/db_user_lookup", json=node("db_user_lookup", "src/db/user.py", ()))
+    h = client.get(f"/api/repos/{REPO}/intents/db_user_lookup/history").json()
+    assert h["source_file"] == "src/db/user.py"
+    assert [c["message"] for c in h["commits"]] == ["Initial import"]
+    assert client.get(f"/api/repos/{REPO}/intents/missing/history").status_code == 404
 
 
 def test_replace_graph_keeps_explicit_relations(client):
