@@ -41,6 +41,10 @@ export function GraphCanvas({ index, revision, focus, selectedId, onSelect, inse
   const initialized = useNodesInitialized();
   const { fitView } = useReactFlow();
   const measuredFor = useRef(-1);
+  const camera = useRef({ focus, insets });
+  useEffect(() => {
+    camera.current = { focus, insets };
+  });
 
   // Pass 1: lay out with size estimates whenever the graph changes.
   useEffect(() => {
@@ -64,7 +68,12 @@ export function GraphCanvas({ index, revision, focus, selectedId, onSelect, inse
     const sizes = new Map(nodes.map((n) => [n.id, { width: n.measured?.width ?? 220, height: n.measured?.height ?? 150 }]));
     const pos = layoutGraph(index, (id) => sizes.get(id) ?? estimateSize(undefined));
     setNodes((ns) => ns.map((n) => ({ ...n, position: pos.get(n.id) ?? n.position })));
-    requestAnimationFrame(() => fitView({ padding: 0.12, duration: 300 }));
+    requestAnimationFrame(() => {
+      const { focus: f, insets: i } = camera.current;
+      if (f?.nodeIds.size)
+        fitView({ nodes: [...f.nodeIds].map((id) => ({ id })), padding: { top: "60px", bottom: "60px", left: `${i.left}px`, right: `${i.right}px` }, duration: 450, maxZoom: 1.1 });
+      else fitView({ padding: 0.12, duration: 300 });
+    });
   }, [initialized, revision, nodes, index, fitView]);
 
   // Move the camera to whatever is focused.

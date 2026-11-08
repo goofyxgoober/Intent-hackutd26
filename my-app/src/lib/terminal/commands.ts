@@ -3,6 +3,8 @@ import { boundaryOf, reachable, shortestPath } from "@/lib/graph/model";
 import type { GraphSource } from "@/lib/api/source";
 import type { RetrievalOptions } from "@/lib/retrieval/engine";
 import { focusFromIds, type Focus } from "@/lib/focus";
+import type { TreeView } from "@/gh/intentApi";
+import { resolveTenet } from "@/lib/tenetLinks";
 
 export type Tone = "prompt" | "success" | "error" | "muted" | "accent" | "plain";
 export interface Line {
@@ -23,6 +25,14 @@ export interface CommandContext {
   query(q: string, opts?: RetrievalOptions): Promise<Focus | null>;
   sync(): Promise<void>;
   fit(): void;
+  /** Axiom/Tenet hierarchy (null until loaded or when signed out). */
+  tenets: TreeView | null;
+  view: "graph" | "tenets";
+  setView(v: "graph" | "tenets"): void;
+  selectTenet(id: string | null): void;
+  openClaim(id: string | null): void;
+  /** What the user has selected; sent with questions so the agent can resolve "this" (chat contract §3). */
+  selection: { view: "intent" | "codebase"; tenet_id: string | null; claim_id: string | null; file: string | null };
 }
 
 export interface Command {
@@ -225,6 +235,83 @@ export const commands: Command[] = [
     },
   },
   {
+    name: "view",
+    aliases: ["tab", "switch"],
+    usage: "view [graph|tenets]",
+    summary: "switch between the codebase graph and the axiom/tenet hierarchy",
+    offline: true,
+    run(args, ctx) {
+      const a = (args[0] ?? "").toLowerCase();
+      let next: "graph" | "tenets" | null = null;
+      if (!a) next = ctx.view === "graph" ? "tenets" : "graph";
+      else if (/^[tah]/.test(a)) next = "tenets";
+      else if (/^[gc]/.test(a)) next = "graph";
+      if (!next) return ctx.print(`  usage: ${this.usage}`, "muted");
+      ctx.setView(next);
+      ctx.print(`  ✓ showing ${next === "graph" ? "codebase graph" : "axiom / tenet hierarchy"}`, "success");
+    },
+  },
+  {
+    name: "tenets",
+    aliases: ["axioms", "tree"],
+    usage: "tenets",
+    summary: "list the tenet hierarchy with axiom/hypothesis counts",
+    offline: true,
+    run(_a, ctx) {
+      const t = ctx.tenets;
+      if (!t) return ctx.print("  tenet tree not loaded (open the tenet view, and sign in for live data)", "error");
+      const byId = new Map(t.tenets.map((x) => [x.id, x]));
+      const lines: string[] = [];
+      const walk = (id: string, depth: number) => {
+        const x = byId.get(id);
+        if (!x) return;
+        const flag = x.flagged_axioms ? `  ⚑${x.flagged_axioms}` : "";
+        lines.push(`  ${"  ".repeat(depth)}${depth ? "├─ " : ""}${x.name}  ${x.axioms}A·${x.hypotheses}H  ${x.rollup}${flag}`);
+        x.children.forEach((c) => walk(c, depth + 1));
+      };
+      if (t.root_id) walk(t.root_id, 0);
+      ctx.print(lines.length ? lines : ["  no tenets yet"]);
+    },
+  },
+  {
+    name: "tenet",
+    aliases: ["axiom"],
+    usage: "tenet <name>",
+    summary: "open a tenet and print its axioms and hypotheses",
+    offline: true,
+    run(args, ctx) {
+      const t = ctx.tenets;
+      if (!t) return ctx.print("  tenet tree not loaded", "error");
+      const id = resolveTenet(t, args.join(" "));
+      if (!id) return ctx.print(args.length ? `  tenet not found: ${args.join(" ")}` : `  usage: ${this.usage}`, args.length ? "error" : "muted");
+      const x = t.tenets.find((y) => y.id === id)!;
+      ctx.setView("tenets");
+      ctx.selectTenet(id);
+      ctx.print([`  ${x.name} · level ${x.level} · ${x.rollup}`, `  ${x.functionality || "no functionality statement"}`]);
+      for (const cid of x.claims) {
+        const c = t.claims[cid];
+        if (c) ctx.print(`  ${c.status === "axiom" ? "◆ A" : "· H"} [${c.result.verdict}] ${c.statement}`, c.status === "axiom" ? "accent" : "plain");
+      }
+    },
+  },
+  {
+    name: "claim",
+    aliases: ["hypothesis"],
+    usage: "claim <id>",
+    summary: "open an axiom or hypothesis with its recipe and verification",
+    offline: true,
+    run(args, ctx) {
+      const t = ctx.tenets;
+      if (!t) return ctx.print("  tenet tree not loaded", "error");
+      const q = args.join(" ").trim().toLowerCase();
+      if (!q) return ctx.print(`  usage: ${this.usage}`, "muted");
+      const c = t.claims[args[0]] ?? Object.values(t.claims).find((x) => x.id.toLowerCase().includes(q) || x.statement.toLowerCase().includes(q));
+      if (!c) return ctx.print(`  claim not found: ${args.join(" ")}`, "error");
+      ctx.openClaim(c.id);
+      ctx.print([`  ${c.status === "axiom" ? "◆ axiom" : "◇ hypothesis"} ${c.id} · ${c.result.verdict} · ${Math.round(c.confidence * 100)}%`, `  ${c.statement}`]);
+    },
+  },
+  {
     name: "sync",
     aliases: ["ingest"],
     usage: "sync",
@@ -278,7 +365,7 @@ export async function execute(raw: string, ctx: CommandContext): Promise<void> {
   }
   try {
     ctx.print("  asking agent…", "muted");
-    const reply = await ctx.source.ask(ctx.repo, raw, f.context);
+    const reply = await ctx.source.ask(ctx.repo, raw, `[UI SELECTION] ${JSON.stringify(ctx.selection)}\n${f.context}`);
     ctx.print(reply.answer.split("\n").map((l) => `  ${l}`));
   } catch (e) {
     ctx.print(`  agent error: ${e instanceof Error ? e.message : String(e)}`, "error");

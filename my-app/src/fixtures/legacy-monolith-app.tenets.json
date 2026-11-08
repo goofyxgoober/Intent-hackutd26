@@ -1,0 +1,989 @@
+{
+ "root_id": "legacy_monolith_app",
+ "tenets": [
+  {
+   "id": "legacy_monolith_app",
+   "name": "legacy-monolith-app",
+   "parent_id": null,
+   "functionality": "Legacy monolith modernization target. Inbound requests are routed, authenticated, authorised and served from the data layer; every flow here is mapped as intent so it can be tested and modernised without reading the raw syntax.",
+   "children": [
+    "area_src_api",
+    "area_src_auth",
+    "area_src_db",
+    "area_src_security",
+    "area_tests",
+    "area_infra",
+    "area_github"
+   ],
+   "references": [],
+   "cross_cutting": [],
+   "code_links": [],
+   "claims": [],
+   "proposed": false,
+   "level": 0,
+   "is_leaf": false,
+   "referenced_by": [],
+   "axioms": 0,
+   "hypotheses": 0,
+   "flagged_axioms": 0,
+   "rollup": "empty",
+   "open_unknowns": [
+    "Whether the batch reporting jobs are in scope for the first modernization pass.",
+    "Which flows are still reachable from the legacy admin UI."
+   ]
+  },
+  {
+   "id": "area_src_api",
+   "name": "src/api",
+   "parent_id": "legacy_monolith_app",
+   "functionality": "Everything under src/api: API Request Router.",
+   "children": [
+    "api_request_router"
+   ],
+   "references": [],
+   "cross_cutting": [],
+   "code_links": [],
+   "claims": [],
+   "proposed": false,
+   "level": 1,
+   "is_leaf": false,
+   "referenced_by": [],
+   "axioms": 0,
+   "hypotheses": 0,
+   "flagged_axioms": 0,
+   "rollup": "empty"
+  },
+  {
+   "id": "api_request_router",
+   "name": "API Request Router",
+   "parent_id": "area_src_api",
+   "functionality": "Routes inbound HTTP requests and requires a validated session for protected paths.",
+   "children": [],
+   "references": [
+    "validate_session",
+    "permission_check"
+   ],
+   "cross_cutting": [],
+   "code_links": [
+    {
+     "path": "src/api/router.py",
+     "symbol": "api_request_router"
+    }
+   ],
+   "claims": [
+    "api_request_router.c1",
+    "api_request_router.c2"
+   ],
+   "proposed": false,
+   "level": 2,
+   "is_leaf": true,
+   "referenced_by": [],
+   "axioms": 1,
+   "hypotheses": 1,
+   "flagged_axioms": 0,
+   "rollup": "untested"
+  },
+  {
+   "id": "area_src_auth",
+   "name": "src/auth",
+   "parent_id": "legacy_monolith_app",
+   "functionality": "Everything under src/auth: Validate Session Token; Refresh Session Token; Role Permission Check.",
+   "children": [
+    "validate_session",
+    "refresh_session",
+    "permission_check"
+   ],
+   "references": [],
+   "cross_cutting": [],
+   "code_links": [],
+   "claims": [
+    "area_src_auth.integration"
+   ],
+   "proposed": false,
+   "level": 1,
+   "is_leaf": false,
+   "referenced_by": [],
+   "axioms": 0,
+   "hypotheses": 1,
+   "flagged_axioms": 0,
+   "rollup": "untested"
+  },
+  {
+   "id": "validate_session",
+   "name": "Validate Session Token",
+   "parent_id": "area_src_auth",
+   "functionality": "Cryptographic signature check before DB lookup.",
+   "children": [],
+   "references": [
+    "db_user_lookup",
+    "audit_logger"
+   ],
+   "cross_cutting": [],
+   "code_links": [
+    {
+     "path": "src/auth/session.py",
+     "symbol": "validate_session"
+    }
+   ],
+   "claims": [
+    "validate_session.c1",
+    "validate_session.c2"
+   ],
+   "proposed": false,
+   "level": 2,
+   "is_leaf": true,
+   "referenced_by": [
+    "api_request_router",
+    "invariant_tests"
+   ],
+   "axioms": 1,
+   "hypotheses": 1,
+   "flagged_axioms": 0,
+   "rollup": "untested"
+  },
+  {
+   "id": "refresh_session",
+   "name": "Refresh Session Token",
+   "parent_id": "area_src_auth",
+   "functionality": "Issues a new short-lived token from a valid refresh token.",
+   "children": [],
+   "references": [
+    "db_user_lookup",
+    "redis_cache"
+   ],
+   "cross_cutting": [],
+   "code_links": [
+    {
+     "path": "src/auth/refresh.py",
+     "symbol": "refresh_session"
+    }
+   ],
+   "claims": [
+    "refresh_session.c1",
+    "refresh_session.c2"
+   ],
+   "proposed": false,
+   "level": 2,
+   "is_leaf": true,
+   "referenced_by": [],
+   "axioms": 1,
+   "hypotheses": 1,
+   "flagged_axioms": 0,
+   "rollup": "untested"
+  },
+  {
+   "id": "permission_check",
+   "name": "Role Permission Check",
+   "parent_id": "area_src_auth",
+   "functionality": "Grants access when the user's role covers the requested action.",
+   "children": [],
+   "references": [
+    "db_user_lookup"
+   ],
+   "cross_cutting": [],
+   "code_links": [
+    {
+     "path": "src/auth/permissions.py",
+     "symbol": "permission_check"
+    }
+   ],
+   "claims": [
+    "permission_check.c1"
+   ],
+   "proposed": false,
+   "level": 2,
+   "is_leaf": true,
+   "referenced_by": [
+    "api_request_router"
+   ],
+   "axioms": 1,
+   "hypotheses": 0,
+   "flagged_axioms": 0,
+   "rollup": "pass"
+  },
+  {
+   "id": "area_src_db",
+   "name": "src/db",
+   "parent_id": "legacy_monolith_app",
+   "functionality": "Everything under src/db: Database User Lookup.",
+   "children": [
+    "db_user_lookup"
+   ],
+   "references": [],
+   "cross_cutting": [],
+   "code_links": [],
+   "claims": [],
+   "proposed": false,
+   "level": 1,
+   "is_leaf": false,
+   "referenced_by": [],
+   "axioms": 0,
+   "hypotheses": 0,
+   "flagged_axioms": 0,
+   "rollup": "empty"
+  },
+  {
+   "id": "db_user_lookup",
+   "name": "Database User Lookup",
+   "parent_id": "area_src_db",
+   "functionality": "Queries read-replica Postgres with permission cache TTL.",
+   "children": [],
+   "references": [
+    "postgres_primary",
+    "redis_cache"
+   ],
+   "cross_cutting": [],
+   "code_links": [
+    {
+     "path": "src/db/user.py",
+     "symbol": "db_user_lookup"
+    }
+   ],
+   "claims": [
+    "db_user_lookup.c1"
+   ],
+   "proposed": false,
+   "level": 2,
+   "is_leaf": true,
+   "referenced_by": [
+    "validate_session",
+    "refresh_session",
+    "permission_check"
+   ],
+   "axioms": 1,
+   "hypotheses": 0,
+   "flagged_axioms": 0,
+   "rollup": "pass"
+  },
+  {
+   "id": "area_src_security",
+   "name": "src/security",
+   "parent_id": "legacy_monolith_app",
+   "functionality": "Everything under src/security: Security Audit Logger.",
+   "children": [
+    "audit_logger"
+   ],
+   "references": [],
+   "cross_cutting": [],
+   "code_links": [],
+   "claims": [],
+   "proposed": false,
+   "level": 1,
+   "is_leaf": false,
+   "referenced_by": [],
+   "axioms": 0,
+   "hypotheses": 0,
+   "flagged_axioms": 0,
+   "rollup": "empty"
+  },
+  {
+   "id": "audit_logger",
+   "name": "Security Audit Logger",
+   "parent_id": "area_src_security",
+   "functionality": "Emits security telemetry for invalid signature events.",
+   "children": [],
+   "references": [
+    "kafka_event_bus"
+   ],
+   "cross_cutting": [],
+   "code_links": [
+    {
+     "path": "src/security/audit.py",
+     "symbol": "audit_logger"
+    }
+   ],
+   "claims": [
+    "audit_logger.c1"
+   ],
+   "proposed": false,
+   "level": 2,
+   "is_leaf": true,
+   "referenced_by": [
+    "validate_session"
+   ],
+   "axioms": 1,
+   "hypotheses": 0,
+   "flagged_axioms": 0,
+   "rollup": "pass"
+  },
+  {
+   "id": "area_tests",
+   "name": "tests",
+   "parent_id": "legacy_monolith_app",
+   "functionality": "Everything under tests: Deterministic Test Suite.",
+   "children": [
+    "invariant_tests"
+   ],
+   "references": [],
+   "cross_cutting": [],
+   "code_links": [],
+   "claims": [],
+   "proposed": false,
+   "level": 1,
+   "is_leaf": false,
+   "referenced_by": [],
+   "axioms": 0,
+   "hypotheses": 0,
+   "flagged_axioms": 0,
+   "rollup": "empty"
+  },
+  {
+   "id": "invariant_tests",
+   "name": "Deterministic Test Suite",
+   "parent_id": "area_tests",
+   "functionality": "Generated tests enforce the mapped business boundaries.",
+   "children": [],
+   "references": [
+    "validate_session",
+    "ci_merge_gate"
+   ],
+   "cross_cutting": [],
+   "code_links": [
+    {
+     "path": "tests/test_invariants.py",
+     "symbol": "invariant_tests"
+    }
+   ],
+   "claims": [
+    "invariant_tests.c1",
+    "invariant_tests.c2"
+   ],
+   "proposed": false,
+   "level": 2,
+   "is_leaf": true,
+   "referenced_by": [],
+   "axioms": 1,
+   "hypotheses": 1,
+   "flagged_axioms": 0,
+   "rollup": "untested"
+  },
+  {
+   "id": "area_infra",
+   "name": "infra",
+   "parent_id": "legacy_monolith_app",
+   "functionality": "Everything under infra: PostgreSQL Primary; Redis Invariant Cache; Kafka Event Bus.",
+   "children": [
+    "postgres_primary",
+    "redis_cache",
+    "kafka_event_bus"
+   ],
+   "references": [],
+   "cross_cutting": [],
+   "code_links": [],
+   "claims": [
+    "area_infra.integration"
+   ],
+   "proposed": false,
+   "level": 1,
+   "is_leaf": false,
+   "referenced_by": [],
+   "axioms": 0,
+   "hypotheses": 1,
+   "flagged_axioms": 0,
+   "rollup": "untested"
+  },
+  {
+   "id": "postgres_primary",
+   "name": "PostgreSQL Primary",
+   "parent_id": "area_infra",
+   "functionality": "Users and role grants isolated behind the connection pool.",
+   "children": [],
+   "references": [],
+   "cross_cutting": [],
+   "code_links": [
+    {
+     "path": "infra/postgres",
+     "symbol": "postgres_primary"
+    }
+   ],
+   "claims": [
+    "postgres_primary.c1"
+   ],
+   "proposed": false,
+   "level": 2,
+   "is_leaf": true,
+   "referenced_by": [
+    "db_user_lookup"
+   ],
+   "axioms": 1,
+   "hypotheses": 0,
+   "flagged_axioms": 0,
+   "rollup": "pass"
+  },
+  {
+   "id": "redis_cache",
+   "name": "Redis Invariant Cache",
+   "parent_id": "area_infra",
+   "functionality": "TTL: 300s session token; instant purge on 401.",
+   "children": [],
+   "references": [],
+   "cross_cutting": [],
+   "code_links": [
+    {
+     "path": "infra/redis",
+     "symbol": "redis_cache"
+    }
+   ],
+   "claims": [
+    "redis_cache.c1"
+   ],
+   "proposed": false,
+   "level": 2,
+   "is_leaf": true,
+   "referenced_by": [
+    "refresh_session",
+    "db_user_lookup"
+   ],
+   "axioms": 1,
+   "hypotheses": 0,
+   "flagged_axioms": 0,
+   "rollup": "pass"
+  },
+  {
+   "id": "kafka_event_bus",
+   "name": "Kafka Event Bus",
+   "parent_id": "area_infra",
+   "functionality": "Immutable security event stream.",
+   "children": [],
+   "references": [],
+   "cross_cutting": [],
+   "code_links": [
+    {
+     "path": "infra/kafka/security.auth_events",
+     "symbol": "kafka_event_bus"
+    }
+   ],
+   "claims": [
+    "kafka_event_bus.c1"
+   ],
+   "proposed": false,
+   "level": 2,
+   "is_leaf": true,
+   "referenced_by": [
+    "audit_logger"
+   ],
+   "axioms": 1,
+   "hypotheses": 0,
+   "flagged_axioms": 0,
+   "rollup": "pass"
+  },
+  {
+   "id": "area_github",
+   "name": ".github",
+   "parent_id": "legacy_monolith_app",
+   "functionality": "Everything under .github: CI Merge Gate.",
+   "children": [
+    "ci_merge_gate"
+   ],
+   "references": [],
+   "cross_cutting": [],
+   "code_links": [],
+   "claims": [],
+   "proposed": false,
+   "level": 1,
+   "is_leaf": false,
+   "referenced_by": [],
+   "axioms": 0,
+   "hypotheses": 0,
+   "flagged_axioms": 0,
+   "rollup": "empty"
+  },
+  {
+   "id": "ci_merge_gate",
+   "name": "CI Merge Gate",
+   "parent_id": "area_github",
+   "functionality": "Zero syntax regression merge boundary.",
+   "children": [],
+   "references": [],
+   "cross_cutting": [],
+   "code_links": [
+    {
+     "path": ".github/workflows/verify.yml",
+     "symbol": "ci_merge_gate"
+    }
+   ],
+   "claims": [
+    "ci_merge_gate.c1"
+   ],
+   "proposed": false,
+   "level": 2,
+   "is_leaf": true,
+   "referenced_by": [
+    "invariant_tests"
+   ],
+   "axioms": 1,
+   "hypotheses": 0,
+   "flagged_axioms": 0,
+   "rollup": "pass"
+  }
+ ],
+ "claims": {
+  "api_request_router.c1": {
+   "id": "api_request_router.c1",
+   "tenet_id": "api_request_router",
+   "status": "axiom",
+   "verification": "verified",
+   "confidence": 0.92,
+   "proposed": false,
+   "flags": [],
+   "version": 1,
+   "statement": "Protected routes never execute a handler before session validation succeeds.",
+   "test_explanation": "Checks the business rule above holds for API Request Router. It matters because routes inbound HTTP requests and requires a validated session for protected paths.",
+   "test_implementation": "ENV/SETUP: Python 3.11 in a throwaway copy of the legacy repo (read-only original). No network.\nFIXTURES: minimal in-memory stand-ins for every dependency of api_request_router (validate_session, permission_check); literal data only.\nINVOKE: call the entry point in src/api/router.py with: request = Incoming HTTP request with path, method and headers.\nASSERT: Protected routes never execute a handler before session validation succeeds.\nEXPECTED: result matches the declared output: response = HTTP response from the matched handler.\nTEARDOWN: delete the temp copy and reset fixtures.\nPASS WHEN: the assertion holds for every fixture case.\nFAIL WHEN: any case violates the assertion, or an unexpected exception escapes.\nINCONCLUSIVE WHEN: a fixture cannot be built, or the entry point is ambiguous.",
+   "dependencies": [],
+   "content_hash": "api_request_router.c1",
+   "provenance": {
+    "kind": "agent",
+    "role": "builder",
+    "actor": "intent_builder",
+    "via": "grilling"
+   },
+   "result": {
+    "verdict": "pass",
+    "flaky": false,
+    "runs": 3,
+    "last_run_at": null
+   }
+  },
+  "api_request_router.c2": {
+   "id": "api_request_router.c2",
+   "tenet_id": "api_request_router",
+   "status": "hypothesis",
+   "verification": null,
+   "confidence": 0.55,
+   "proposed": false,
+   "flags": [],
+   "version": 1,
+   "statement": "Unknown routes return 404 without touching auth.",
+   "test_explanation": "Checks the business rule above holds for API Request Router. It matters because routes inbound HTTP requests and requires a validated session for protected paths.",
+   "test_implementation": "ENV/SETUP: Python 3.11 in a throwaway copy of the legacy repo (read-only original). No network.\nFIXTURES: minimal in-memory stand-ins for every dependency of api_request_router (validate_session, permission_check); literal data only.\nINVOKE: call the entry point in src/api/router.py with: request = Incoming HTTP request with path, method and headers.\nASSERT: Unknown routes return 404 without touching auth.\nEXPECTED: result matches the declared output: response = HTTP response from the matched handler.\nTEARDOWN: delete the temp copy and reset fixtures.\nPASS WHEN: the assertion holds for every fixture case.\nFAIL WHEN: any case violates the assertion, or an unexpected exception escapes.\nINCONCLUSIVE WHEN: a fixture cannot be built, or the entry point is ambiguous.",
+   "dependencies": [],
+   "content_hash": "api_request_router.c2",
+   "provenance": {
+    "kind": "agent",
+    "role": "builder",
+    "actor": "intent_builder",
+    "via": "grilling"
+   },
+   "result": {
+    "verdict": "untested",
+    "flaky": false,
+    "runs": 0,
+    "last_run_at": null
+   }
+  },
+  "validate_session.c1": {
+   "id": "validate_session.c1",
+   "tenet_id": "validate_session",
+   "status": "axiom",
+   "verification": "verified",
+   "confidence": 0.92,
+   "proposed": false,
+   "flags": [],
+   "version": 1,
+   "statement": "Expired session tokens must immediately reject with 401 Unauthorized.",
+   "test_explanation": "Checks the business rule above holds for Validate Session Token. It matters because cryptographic signature check before DB lookup.",
+   "test_implementation": "ENV/SETUP: Python 3.11 in a throwaway copy of the legacy repo (read-only original). No network.\nFIXTURES: minimal in-memory stand-ins for every dependency of validate_session (db_user_lookup, audit_logger); literal data only.\nINVOKE: call the entry point in src/auth/session.py with: auth_header = Raw HTTP Authorization header string.\nASSERT: Expired session tokens must immediately reject with 401 Unauthorized.\nEXPECTED: result matches the declared output: user_identity = Validated User context object or SessionError exception.\nTEARDOWN: delete the temp copy and reset fixtures.\nPASS WHEN: the assertion holds for every fixture case.\nFAIL WHEN: any case violates the assertion, or an unexpected exception escapes.\nINCONCLUSIVE WHEN: a fixture cannot be built, or the entry point is ambiguous.",
+   "dependencies": [],
+   "content_hash": "validate_session.c1",
+   "provenance": {
+    "kind": "agent",
+    "role": "builder",
+    "actor": "intent_builder",
+    "via": "grilling"
+   },
+   "result": {
+    "verdict": "pass",
+    "flaky": false,
+    "runs": 3,
+    "last_run_at": null
+   }
+  },
+  "validate_session.c2": {
+   "id": "validate_session.c2",
+   "tenet_id": "validate_session",
+   "status": "hypothesis",
+   "verification": null,
+   "confidence": 0.55,
+   "proposed": false,
+   "flags": [],
+   "version": 1,
+   "statement": "Database lookup occurs only if token signature validation passes.",
+   "test_explanation": "Checks the business rule above holds for Validate Session Token. It matters because cryptographic signature check before DB lookup.",
+   "test_implementation": "ENV/SETUP: Python 3.11 in a throwaway copy of the legacy repo (read-only original). No network.\nFIXTURES: minimal in-memory stand-ins for every dependency of validate_session (db_user_lookup, audit_logger); literal data only.\nINVOKE: call the entry point in src/auth/session.py with: auth_header = Raw HTTP Authorization header string.\nASSERT: Database lookup occurs only if token signature validation passes.\nEXPECTED: result matches the declared output: user_identity = Validated User context object or SessionError exception.\nTEARDOWN: delete the temp copy and reset fixtures.\nPASS WHEN: the assertion holds for every fixture case.\nFAIL WHEN: any case violates the assertion, or an unexpected exception escapes.\nINCONCLUSIVE WHEN: a fixture cannot be built, or the entry point is ambiguous.",
+   "dependencies": [],
+   "content_hash": "validate_session.c2",
+   "provenance": {
+    "kind": "agent",
+    "role": "builder",
+    "actor": "intent_builder",
+    "via": "grilling"
+   },
+   "result": {
+    "verdict": "untested",
+    "flaky": false,
+    "runs": 0,
+    "last_run_at": null
+   }
+  },
+  "refresh_session.c1": {
+   "id": "refresh_session.c1",
+   "tenet_id": "refresh_session",
+   "status": "axiom",
+   "verification": "verified",
+   "confidence": 0.92,
+   "proposed": false,
+   "flags": [],
+   "version": 1,
+   "statement": "A refresh token can be redeemed exactly once.",
+   "test_explanation": "Checks the business rule above holds for Refresh Session Token. It matters because issues a new short-lived token from a valid refresh token.",
+   "test_implementation": "ENV/SETUP: Python 3.11 in a throwaway copy of the legacy repo (read-only original). No network.\nFIXTURES: minimal in-memory stand-ins for every dependency of refresh_session (db_user_lookup, redis_cache); literal data only.\nINVOKE: call the entry point in src/auth/refresh.py with: refresh_token = Opaque refresh token from secure cookie.\nASSERT: A refresh token can be redeemed exactly once.\nEXPECTED: result matches the declared output: session_token = Newly signed session token.\nTEARDOWN: delete the temp copy and reset fixtures.\nPASS WHEN: the assertion holds for every fixture case.\nFAIL WHEN: any case violates the assertion, or an unexpected exception escapes.\nINCONCLUSIVE WHEN: a fixture cannot be built, or the entry point is ambiguous.",
+   "dependencies": [],
+   "content_hash": "refresh_session.c1",
+   "provenance": {
+    "kind": "agent",
+    "role": "builder",
+    "actor": "intent_builder",
+    "via": "grilling"
+   },
+   "result": {
+    "verdict": "pass",
+    "flaky": false,
+    "runs": 3,
+    "last_run_at": null
+   }
+  },
+  "refresh_session.c2": {
+   "id": "refresh_session.c2",
+   "tenet_id": "refresh_session",
+   "status": "hypothesis",
+   "verification": null,
+   "confidence": 0.55,
+   "proposed": false,
+   "flags": [],
+   "version": 1,
+   "statement": "Refresh is refused if the user record is disabled.",
+   "test_explanation": "Checks the business rule above holds for Refresh Session Token. It matters because issues a new short-lived token from a valid refresh token.",
+   "test_implementation": "ENV/SETUP: Python 3.11 in a throwaway copy of the legacy repo (read-only original). No network.\nFIXTURES: minimal in-memory stand-ins for every dependency of refresh_session (db_user_lookup, redis_cache); literal data only.\nINVOKE: call the entry point in src/auth/refresh.py with: refresh_token = Opaque refresh token from secure cookie.\nASSERT: Refresh is refused if the user record is disabled.\nEXPECTED: result matches the declared output: session_token = Newly signed session token.\nTEARDOWN: delete the temp copy and reset fixtures.\nPASS WHEN: the assertion holds for every fixture case.\nFAIL WHEN: any case violates the assertion, or an unexpected exception escapes.\nINCONCLUSIVE WHEN: a fixture cannot be built, or the entry point is ambiguous.",
+   "dependencies": [],
+   "content_hash": "refresh_session.c2",
+   "provenance": {
+    "kind": "agent",
+    "role": "builder",
+    "actor": "intent_builder",
+    "via": "grilling"
+   },
+   "result": {
+    "verdict": "untested",
+    "flaky": false,
+    "runs": 0,
+    "last_run_at": null
+   }
+  },
+  "permission_check.c1": {
+   "id": "permission_check.c1",
+   "tenet_id": "permission_check",
+   "status": "axiom",
+   "verification": "verified",
+   "confidence": 0.92,
+   "proposed": false,
+   "flags": [],
+   "version": 1,
+   "statement": "Default decision is deny when no role grant matches.",
+   "test_explanation": "Checks the business rule above holds for Role Permission Check. It matters because grants access when the user's role covers the requested action.",
+   "test_implementation": "ENV/SETUP: Python 3.11 in a throwaway copy of the legacy repo (read-only original). No network.\nFIXTURES: minimal in-memory stand-ins for every dependency of permission_check (db_user_lookup); literal data only.\nINVOKE: call the entry point in src/auth/permissions.py with: user_identity = Validated user context; action = Requested action key.\nASSERT: Default decision is deny when no role grant matches.\nEXPECTED: result matches the declared output: allowed = Boolean grant decision.\nTEARDOWN: delete the temp copy and reset fixtures.\nPASS WHEN: the assertion holds for every fixture case.\nFAIL WHEN: any case violates the assertion, or an unexpected exception escapes.\nINCONCLUSIVE WHEN: a fixture cannot be built, or the entry point is ambiguous.",
+   "dependencies": [],
+   "content_hash": "permission_check.c1",
+   "provenance": {
+    "kind": "agent",
+    "role": "builder",
+    "actor": "intent_builder",
+    "via": "grilling"
+   },
+   "result": {
+    "verdict": "pass",
+    "flaky": false,
+    "runs": 3,
+    "last_run_at": null
+   }
+  },
+  "area_src_auth.integration": {
+   "id": "area_src_auth.integration",
+   "tenet_id": "area_src_auth",
+   "status": "hypothesis",
+   "verification": null,
+   "confidence": 0.4,
+   "proposed": false,
+   "flags": [],
+   "version": 1,
+   "statement": "The flows in src/auth compose correctly: Validate Session Token, Refresh Session Token, Role Permission Check hand off in dependency order with no step skipped.",
+   "test_explanation": "Integration claim. It only runs once its children's locked invariants pass, so a failure here points at the composition, not a child.",
+   "test_implementation": "ENV/SETUP: same sandbox as the child recipes.\nFIXTURES: reuse the child fixtures; share one request context across steps.\nORDER: run each child recipe first, in dependency order (validate_session -> refresh_session -> permission_check).\nINVOKE: drive one end-to-end call through src/auth.\nASSERT: every step is reached in order and the final output equals the last child's declared output.\nEXPECTED: no step is skipped and no child invariant is violated.\nTEARDOWN: reset the shared context.\nPASS WHEN: all children pass and the end-to-end call matches.\nFAIL WHEN: all children pass but the end-to-end call does not.\nINCONCLUSIVE WHEN: any child result is stale or missing.\nLOCALIZE: if a child fails, report 'blocked by child failure'. If every child passes and this fails, the fault is in the composition.",
+   "dependencies": [
+    "validate_session.c1",
+    "refresh_session.c1",
+    "permission_check.c1"
+   ],
+   "content_hash": "area_src_auth.integration",
+   "provenance": {
+    "kind": "agent",
+    "role": "builder",
+    "actor": "intent_builder",
+    "via": "grilling"
+   },
+   "result": {
+    "verdict": "untested",
+    "flaky": false,
+    "runs": 0,
+    "last_run_at": null
+   }
+  },
+  "db_user_lookup.c1": {
+   "id": "db_user_lookup.c1",
+   "tenet_id": "db_user_lookup",
+   "status": "axiom",
+   "verification": "verified",
+   "confidence": 0.92,
+   "proposed": false,
+   "flags": [],
+   "version": 1,
+   "statement": "Identity is cached only for a valid token.",
+   "test_explanation": "Checks the business rule above holds for Database User Lookup. It matters because queries read-replica Postgres with permission cache TTL.",
+   "test_implementation": "ENV/SETUP: Python 3.11 in a throwaway copy of the legacy repo (read-only original). No network.\nFIXTURES: minimal in-memory stand-ins for every dependency of db_user_lookup (postgres_primary, redis_cache); literal data only.\nINVOKE: call the entry point in src/db/user.py with: user_id = Subject id from the validated token.\nASSERT: Identity is cached only for a valid token.\nEXPECTED: result matches the declared output: user_record = User row with role grants.\nTEARDOWN: delete the temp copy and reset fixtures.\nPASS WHEN: the assertion holds for every fixture case.\nFAIL WHEN: any case violates the assertion, or an unexpected exception escapes.\nINCONCLUSIVE WHEN: a fixture cannot be built, or the entry point is ambiguous.",
+   "dependencies": [],
+   "content_hash": "db_user_lookup.c1",
+   "provenance": {
+    "kind": "agent",
+    "role": "builder",
+    "actor": "intent_builder",
+    "via": "grilling"
+   },
+   "result": {
+    "verdict": "pass",
+    "flaky": false,
+    "runs": 3,
+    "last_run_at": null
+   }
+  },
+  "audit_logger.c1": {
+   "id": "audit_logger.c1",
+   "tenet_id": "audit_logger",
+   "status": "axiom",
+   "verification": "verified",
+   "confidence": 0.92,
+   "proposed": false,
+   "flags": [],
+   "version": 1,
+   "statement": "Every invalid signature creates an immutable audit record.",
+   "test_explanation": "Checks the business rule above holds for Security Audit Logger. It matters because emits security telemetry for invalid signature events.",
+   "test_implementation": "ENV/SETUP: Python 3.11 in a throwaway copy of the legacy repo (read-only original). No network.\nFIXTURES: minimal in-memory stand-ins for every dependency of audit_logger (kafka_event_bus); literal data only.\nINVOKE: call the entry point in src/security/audit.py with: event = Security event with actor, reason and timestamp.\nASSERT: Every invalid signature creates an immutable audit record.\nEXPECTED: result matches the declared output: audit_record_id = Id of the appended audit event.\nTEARDOWN: delete the temp copy and reset fixtures.\nPASS WHEN: the assertion holds for every fixture case.\nFAIL WHEN: any case violates the assertion, or an unexpected exception escapes.\nINCONCLUSIVE WHEN: a fixture cannot be built, or the entry point is ambiguous.",
+   "dependencies": [],
+   "content_hash": "audit_logger.c1",
+   "provenance": {
+    "kind": "agent",
+    "role": "builder",
+    "actor": "intent_builder",
+    "via": "grilling"
+   },
+   "result": {
+    "verdict": "pass",
+    "flaky": false,
+    "runs": 3,
+    "last_run_at": null
+   }
+  },
+  "invariant_tests.c1": {
+   "id": "invariant_tests.c1",
+   "tenet_id": "invariant_tests",
+   "status": "axiom",
+   "verification": "verified",
+   "confidence": 0.92,
+   "proposed": false,
+   "flags": [],
+   "version": 1,
+   "statement": "Expired signatures return 401.",
+   "test_explanation": "Checks the business rule above holds for Deterministic Test Suite. It matters because generated tests enforce the mapped business boundaries.",
+   "test_implementation": "ENV/SETUP: Python 3.11 in a throwaway copy of the legacy repo (read-only original). No network.\nFIXTURES: minimal in-memory stand-ins for every dependency of invariant_tests (validate_session, ci_merge_gate); literal data only.\nINVOKE: call the entry point in tests/test_invariants.py with: none.\nASSERT: Expired signatures return 401.\nEXPECTED: result matches the declared output: report = Pass/fail per invariant.\nTEARDOWN: delete the temp copy and reset fixtures.\nPASS WHEN: the assertion holds for every fixture case.\nFAIL WHEN: any case violates the assertion, or an unexpected exception escapes.\nINCONCLUSIVE WHEN: a fixture cannot be built, or the entry point is ambiguous.",
+   "dependencies": [],
+   "content_hash": "invariant_tests.c1",
+   "provenance": {
+    "kind": "agent",
+    "role": "builder",
+    "actor": "intent_builder",
+    "via": "grilling"
+   },
+   "result": {
+    "verdict": "pass",
+    "flaky": false,
+    "runs": 3,
+    "last_run_at": null
+   }
+  },
+  "invariant_tests.c2": {
+   "id": "invariant_tests.c2",
+   "tenet_id": "invariant_tests",
+   "status": "hypothesis",
+   "verification": null,
+   "confidence": 0.55,
+   "proposed": false,
+   "flags": [],
+   "version": 1,
+   "statement": "Rejected requests never call the database.",
+   "test_explanation": "Checks the business rule above holds for Deterministic Test Suite. It matters because generated tests enforce the mapped business boundaries.",
+   "test_implementation": "ENV/SETUP: Python 3.11 in a throwaway copy of the legacy repo (read-only original). No network.\nFIXTURES: minimal in-memory stand-ins for every dependency of invariant_tests (validate_session, ci_merge_gate); literal data only.\nINVOKE: call the entry point in tests/test_invariants.py with: none.\nASSERT: Rejected requests never call the database.\nEXPECTED: result matches the declared output: report = Pass/fail per invariant.\nTEARDOWN: delete the temp copy and reset fixtures.\nPASS WHEN: the assertion holds for every fixture case.\nFAIL WHEN: any case violates the assertion, or an unexpected exception escapes.\nINCONCLUSIVE WHEN: a fixture cannot be built, or the entry point is ambiguous.",
+   "dependencies": [],
+   "content_hash": "invariant_tests.c2",
+   "provenance": {
+    "kind": "agent",
+    "role": "builder",
+    "actor": "intent_builder",
+    "via": "grilling"
+   },
+   "result": {
+    "verdict": "untested",
+    "flaky": false,
+    "runs": 0,
+    "last_run_at": null
+   }
+  },
+  "postgres_primary.c1": {
+   "id": "postgres_primary.c1",
+   "tenet_id": "postgres_primary",
+   "status": "axiom",
+   "verification": "verified",
+   "confidence": 0.92,
+   "proposed": false,
+   "flags": [],
+   "version": 1,
+   "statement": "Only the read replica is queried by session validation.",
+   "test_explanation": "Checks the business rule above holds for PostgreSQL Primary. It matters because users and role grants isolated behind the connection pool.",
+   "test_implementation": "ENV/SETUP: Python 3.11 in a throwaway copy of the legacy repo (read-only original). No network.\nFIXTURES: minimal in-memory stand-ins for every dependency of postgres_primary (none); literal data only.\nINVOKE: call the entry point in infra/postgres with: none.\nASSERT: Only the read replica is queried by session validation.\nEXPECTED: result matches the declared output: none.\nTEARDOWN: delete the temp copy and reset fixtures.\nPASS WHEN: the assertion holds for every fixture case.\nFAIL WHEN: any case violates the assertion, or an unexpected exception escapes.\nINCONCLUSIVE WHEN: a fixture cannot be built, or the entry point is ambiguous.",
+   "dependencies": [],
+   "content_hash": "postgres_primary.c1",
+   "provenance": {
+    "kind": "agent",
+    "role": "builder",
+    "actor": "intent_builder",
+    "via": "grilling"
+   },
+   "result": {
+    "verdict": "pass",
+    "flaky": false,
+    "runs": 3,
+    "last_run_at": null
+   }
+  },
+  "redis_cache.c1": {
+   "id": "redis_cache.c1",
+   "tenet_id": "redis_cache",
+   "status": "axiom",
+   "verification": "verified",
+   "confidence": 0.92,
+   "proposed": false,
+   "flags": [],
+   "version": 1,
+   "statement": "Invalid sessions purge the cached identity immediately.",
+   "test_explanation": "Checks the business rule above holds for Redis Invariant Cache. It matters because tTL: 300s session token; instant purge on 401.",
+   "test_implementation": "ENV/SETUP: Python 3.11 in a throwaway copy of the legacy repo (read-only original). No network.\nFIXTURES: minimal in-memory stand-ins for every dependency of redis_cache (none); literal data only.\nINVOKE: call the entry point in infra/redis with: none.\nASSERT: Invalid sessions purge the cached identity immediately.\nEXPECTED: result matches the declared output: none.\nTEARDOWN: delete the temp copy and reset fixtures.\nPASS WHEN: the assertion holds for every fixture case.\nFAIL WHEN: any case violates the assertion, or an unexpected exception escapes.\nINCONCLUSIVE WHEN: a fixture cannot be built, or the entry point is ambiguous.",
+   "dependencies": [],
+   "content_hash": "redis_cache.c1",
+   "provenance": {
+    "kind": "agent",
+    "role": "builder",
+    "actor": "intent_builder",
+    "via": "grilling"
+   },
+   "result": {
+    "verdict": "pass",
+    "flaky": false,
+    "runs": 3,
+    "last_run_at": null
+   }
+  },
+  "kafka_event_bus.c1": {
+   "id": "kafka_event_bus.c1",
+   "tenet_id": "kafka_event_bus",
+   "status": "axiom",
+   "verification": "verified",
+   "confidence": 0.92,
+   "proposed": false,
+   "flags": [],
+   "version": 1,
+   "statement": "Audit events are append-only.",
+   "test_explanation": "Checks the business rule above holds for Kafka Event Bus. It matters because immutable security event stream.",
+   "test_implementation": "ENV/SETUP: Python 3.11 in a throwaway copy of the legacy repo (read-only original). No network.\nFIXTURES: minimal in-memory stand-ins for every dependency of kafka_event_bus (none); literal data only.\nINVOKE: call the entry point in infra/kafka/security.auth_events with: none.\nASSERT: Audit events are append-only.\nEXPECTED: result matches the declared output: none.\nTEARDOWN: delete the temp copy and reset fixtures.\nPASS WHEN: the assertion holds for every fixture case.\nFAIL WHEN: any case violates the assertion, or an unexpected exception escapes.\nINCONCLUSIVE WHEN: a fixture cannot be built, or the entry point is ambiguous.",
+   "dependencies": [],
+   "content_hash": "kafka_event_bus.c1",
+   "provenance": {
+    "kind": "agent",
+    "role": "builder",
+    "actor": "intent_builder",
+    "via": "grilling"
+   },
+   "result": {
+    "verdict": "pass",
+    "flaky": false,
+    "runs": 3,
+    "last_run_at": null
+   }
+  },
+  "area_infra.integration": {
+   "id": "area_infra.integration",
+   "tenet_id": "area_infra",
+   "status": "hypothesis",
+   "verification": null,
+   "confidence": 0.4,
+   "proposed": false,
+   "flags": [],
+   "version": 1,
+   "statement": "The flows in infra compose correctly: PostgreSQL Primary, Redis Invariant Cache, Kafka Event Bus hand off in dependency order with no step skipped.",
+   "test_explanation": "Integration claim. It only runs once its children's locked invariants pass, so a failure here points at the composition, not a child.",
+   "test_implementation": "ENV/SETUP: same sandbox as the child recipes.\nFIXTURES: reuse the child fixtures; share one request context across steps.\nORDER: run each child recipe first, in dependency order (postgres_primary -> redis_cache -> kafka_event_bus).\nINVOKE: drive one end-to-end call through infra.\nASSERT: every step is reached in order and the final output equals the last child's declared output.\nEXPECTED: no step is skipped and no child invariant is violated.\nTEARDOWN: reset the shared context.\nPASS WHEN: all children pass and the end-to-end call matches.\nFAIL WHEN: all children pass but the end-to-end call does not.\nINCONCLUSIVE WHEN: any child result is stale or missing.\nLOCALIZE: if a child fails, report 'blocked by child failure'. If every child passes and this fails, the fault is in the composition.",
+   "dependencies": [
+    "postgres_primary.c1",
+    "redis_cache.c1",
+    "kafka_event_bus.c1"
+   ],
+   "content_hash": "area_infra.integration",
+   "provenance": {
+    "kind": "agent",
+    "role": "builder",
+    "actor": "intent_builder",
+    "via": "grilling"
+   },
+   "result": {
+    "verdict": "untested",
+    "flaky": false,
+    "runs": 0,
+    "last_run_at": null
+   }
+  },
+  "ci_merge_gate.c1": {
+   "id": "ci_merge_gate.c1",
+   "tenet_id": "ci_merge_gate",
+   "status": "axiom",
+   "verification": "verified",
+   "confidence": 0.92,
+   "proposed": false,
+   "flags": [],
+   "version": 1,
+   "statement": "All generated invariants must pass before merge.",
+   "test_explanation": "Checks the business rule above holds for CI Merge Gate. It matters because zero syntax regression merge boundary.",
+   "test_implementation": "ENV/SETUP: Python 3.11 in a throwaway copy of the legacy repo (read-only original). No network.\nFIXTURES: minimal in-memory stand-ins for every dependency of ci_merge_gate (none); literal data only.\nINVOKE: call the entry point in .github/workflows/verify.yml with: none.\nASSERT: All generated invariants must pass before merge.\nEXPECTED: result matches the declared output: none.\nTEARDOWN: delete the temp copy and reset fixtures.\nPASS WHEN: the assertion holds for every fixture case.\nFAIL WHEN: any case violates the assertion, or an unexpected exception escapes.\nINCONCLUSIVE WHEN: a fixture cannot be built, or the entry point is ambiguous.",
+   "dependencies": [],
+   "content_hash": "ci_merge_gate.c1",
+   "provenance": {
+    "kind": "agent",
+    "role": "builder",
+    "actor": "intent_builder",
+    "via": "grilling"
+   },
+   "result": {
+    "verdict": "pass",
+    "flaky": false,
+    "runs": 3,
+    "last_run_at": null
+   }
+  }
+ }
+}

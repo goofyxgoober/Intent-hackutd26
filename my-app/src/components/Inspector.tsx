@@ -11,6 +11,9 @@ interface Props {
   focus: Focus | null;
   onSelect(id: string | null): void;
   onGenerateTests(id: string): void;
+  /** Tenets whose code links cover this node's file. */
+  tenets?: { id: string; name: string; rollup: string }[];
+  onOpenTenet?(id: string): void;
 }
 
 function IO({ label, map }: { label: string; map: Record<string, string> }) {
@@ -30,7 +33,7 @@ function IO({ label, map }: { label: string; map: Record<string, string> }) {
   );
 }
 
-export function Inspector({ index, nodeId, focus, onSelect, onGenerateTests }: Props) {
+export function Inspector({ index, nodeId, focus, onSelect, onGenerateTests, tenets, onOpenTenet }: Props) {
   const [copied, setCopied] = useState(false);
   const node = index.nodes.get(nodeId);
   if (!node) return null;
@@ -102,6 +105,19 @@ export function Inspector({ index, nodeId, focus, onSelect, onGenerateTests }: P
       ) : (
         <p className="muted">none mapped</p>
       )}
+
+      {tenets?.length ? (
+        <>
+          <h3>Constrained by tenets</h3>
+          <div className="dependencies">
+            {tenets.map((t) => (
+              <button key={t.id} onClick={() => onOpenTenet?.(t.id)} title={`${t.rollup}: open in tenet hierarchy`}>
+                {t.name}
+              </button>
+            ))}
+          </div>
+        </>
+      ) : null}
 
       <h3>Downstream dependencies</h3>
       <DepList items={downstream} empty="terminal boundary" />
