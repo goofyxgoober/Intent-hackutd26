@@ -54,13 +54,29 @@ def answer_all(max_steps=60, reply="A"):
     return visited
 
 
-def test_pipeline_makes_root_and_features_without_canned_claims(store):
+def started_with_one_hypothesis(store):
+    """Every Tenet has a Hypothesis from creation; none is an Axiom and none has a fake test."""
+    claims = store.claims()
+    for t in store.tenets().values():
+        own = [claims[c] for c in t["claims"] if c in claims]
+        assert own, f"{t['name']} has no Hypothesis"
+    assert all(c["status"] == "hypothesis" and c["test_implementation"] == "" for c in claims.values())
+    return claims
+
+
+def test_pipeline_makes_root_and_features_each_with_a_hypothesis(store):
     tenets, levels = tree(store)
     root = next(t for t in tenets.values() if not t["parent_id"])
     assert root["name"] == "Legacy"
     features = sorted(tenets[c]["name"] for c in root["children"])
     assert features == ["Auth", "Db", "Web"]
-    assert store.claims() == {}  # Hypotheses come from grilling, not pre-written
+    claims = started_with_one_hypothesis(store)
+    assert all(len(t["claims"]) == 1 for t in tenets.values())
+    auth = next(t for t in tenets.values() if t["name"] == "Auth")
+    # taken from the code: the rule session.py's annotation says it enforces
+    assert claims[auth["claims"][0]]["statement"] == "Expired tokens are rejected"
+    root_claim = claims[root["claims"][0]]["statement"]
+    assert root_claim.startswith("Legacy combines") and "Auth" in root_claim
     auth = next(t for t in tenets.values() if t["name"] == "Auth")
     assert "Validates session tokens." in auth["functionality"]  # from the file's own annotation
 
@@ -77,6 +93,7 @@ def test_grilling_builds_the_hierarchy_level_by_level(store):
 
     tenets, levels = tree(store)
     assert max(levels.values()) >= 2, "grilling should build tenets below the features"
+    started_with_one_hypothesis(store)  # including every tenet grilling created
     auth = next(t for t in tenets.values() if t["name"] == "Auth")
     assert sorted(tenets[c]["name"] for c in auth["children"]) == ["Session", "Token"]
     # code links live on leaves only, and every file is still covered exactly once
@@ -95,18 +112,18 @@ def test_answers_become_hypotheses_verbatim_without_fake_tests(store):
     for q in status["questions"]:
         text = rule if q["text"].startswith("What must ") else "A"
         grill.submit_grill_answer(WS, text, question_id=q["id"])
-    claims = list(store.claims().values())
-    assert [c["statement"] for c in claims] == [rule]
-    assert claims[0]["status"] == "hypothesis"
-    assert claims[0]["test_implementation"] == ""  # the Test Author writes real tests later
-    assert claims[0]["provenance"]["via"] == "grilling"
+    from_answers = [c for c in store.claims().values() if c["provenance"].get("via") == "grilling"]
+    assert [c["statement"] for c in from_answers] == [rule]
+    assert from_answers[0]["status"] == "hypothesis"
+    assert from_answers[0]["test_implementation"] == ""  # the Test Author writes real tests later
 
 
 def test_one_word_replies_do_not_become_hypotheses(store):
     grill.start_grill_session(WS)
+    before = set(store.claims())
     grill.submit_grill_answer(WS, "A")    # confirms the draft
     grill.submit_grill_answer(WS, "ok")   # not a rule
-    assert store.claims() == {}
+    assert set(store.claims()) == before
 
 
 def test_typed_correction_replaces_the_draft(store):
@@ -127,7 +144,8 @@ def test_dont_know_is_recorded_and_never_blocks(store):
             break
         grill.submit_grill_answer(WS, "", dont_know=True)
     state = grill.load_grill_state(WS)
-    assert state["unknowns"] and store.claims() == {}
+    assert state["unknowns"]
+    assert not [c for c in store.claims().values() if c["provenance"].get("via") == "grilling"]
     assert grill.get_grill_status(WS)["level"] == 1  # moved on to the features
 
 
@@ -179,6 +197,7 @@ def test_llm_drives_questions_and_split(store, monkeypatch):
     # invented paths are dropped; files the LLM left out go to an "Other" child so nothing is lost
     assert [l["path"] for l in kids["Session checks"]["code_links"]] == ["src/auth/session.py"]
     assert [l["path"] for l in kids["Other Auth code"]["code_links"]] == ["src/auth/token.py"]
+    # the LLM's Hypothesis is added next to the starting one (same text, so not duplicated)
     assert [store.claim(c)["statement"] for c in auth["claims"]] == ["Expired tokens are rejected"]
     assert any("Signs users in" in p or "sign-in" in p for p in calls[1:]), "answers feed the next prompts"
 

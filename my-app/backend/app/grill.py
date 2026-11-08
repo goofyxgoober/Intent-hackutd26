@@ -253,6 +253,82 @@ def _describe(store: IntentStore, name: str, paths: List[str]) -> str:
     return f"Covers {', '.join(paths[:5])}{' and more' if len(paths) > 5 else ''}."
 
 
+# ---------------------------------------------------------------- starting Hypotheses
+
+
+def _first_sentence(text: str) -> str:
+    text = re.sub(r"\s+", " ", text or "").strip()
+    text = re.sub(r"^Draft:\s*|\s*Grilling confirms or corrects this\.?$", "", text).strip()
+    m = re.match(r"(.+?[.!?])(\s|$)", text)
+    return (m.group(1) if m else text)[:300]
+
+
+_TAUTOLOGY = re.compile(r"^\w+(\.\w+)?\(\): executes [\w ]+ (logic|operations)\.?$")
+
+
+def _responsibilities(store: IntentStore, paths: List[str]) -> List[str]:
+    """Responsibilities from annotations, minus restatements like "validate(): executes validate logic"."""
+    out: List[str] = []
+    for p in paths[:MAX_CONTEXT_FILES]:
+        s = (store.get_annotation(p) or {}).get("summary")
+        if isinstance(s, dict):
+            out.extend(str(r) for r in s.get("responsibilities", []) if r and not _TAUTOLOGY.match(str(r)))
+    return out
+
+
+def default_hypothesis(store: IntentStore, tenets: Dict[str, dict], tid: str) -> dict:
+    """A starting Hypothesis for a new Tenet, taken from its own code.
+
+    Preference: a rule its code visibly enforces, then what its code is responsible for,
+    then its functionality, then how its children fit together. It is a Hypothesis: the
+    user may refine, scrap or promote it, but is never required to lock anything.
+    """
+    t = tenets[tid]
+    name = t["name"]
+    paths = [] if t["children"] else _scope_files(store, tenets, tid)
+    invariants = _invariants(store, paths)
+    if invariants:
+        statement = invariants[0]
+    else:
+        responsibilities = _responsibilities(store, paths)
+        sentence = _first_sentence(t.get("functionality", ""))
+        kids = [tenets[c]["name"] for c in t["children"] if c in tenets]
+        if kids:  # higher levels get an integration Hypothesis over their children (spec 4.2)
+            statement = f"{name} combines {', '.join(kids[:-1]) + ' and ' + kids[-1] if len(kids) > 1 else kids[0]} to provide its behaviour."
+        elif responsibilities:
+            statement = f"{name}: {responsibilities[0]}"
+        elif sentence and not sentence.startswith("Code in ") and not sentence.startswith("Covers "):
+            statement = f"{name}: {sentence}"
+        elif paths:
+            shown = ", ".join(paths[:3]) + (" and more" if len(paths) > 3 else "")
+            statement = f"{name} provides the behaviour implemented in {shown}."
+        else:
+            statement = f"{name} behaves as its code shows; refine this while grilling."
+    return {
+        "statement": statement.strip()[:400],
+        "test_explanation": f"Checks this against the code linked to {name}. A starting Hypothesis to refine, scrap or promote.",
+    }
+
+
+def ensure_hypothesis(store: IntentStore, tid: str, via: str) -> Optional[str]:
+    """Give a Tenet its starting Hypothesis if it has no live Claim yet. Returns the new Claim id."""
+    tenets = store.tenets()
+    t = tenets.get(tid)
+    live = store.claims()  # excludes scrapped Claims
+    if t is None or any(c in live for c in t["claims"]):
+        return None
+    h = default_hypothesis(store, tenets, tid)
+    claim = store.create_claim(BUILDER, tid, {
+        "statement": h["statement"],
+        "test_explanation": h["test_explanation"],
+        "test_implementation": "",  # the Test Author writes the recipe
+        "dependencies": [],
+        "confidence": 0.4,
+        "provenance": {"via": via},
+    })
+    return claim["id"]
+
+
 # ---------------------------------------------------------------- questions
 
 
@@ -337,6 +413,7 @@ def _apply_children(store: IntentStore, tid: str, parts: List[Tuple[str, str, Li
         child = store.create_tenet(BUILDER, name[:200], functionality, tid, [], {"via": "grilling"})
         if paths:
             store.set_links(ENGINE, child["id"], [{"path": p} for p in paths])
+        ensure_hypothesis(store, child["id"], "grilling")  # every new Tenet starts with a Hypothesis
         existing.add(name.lower())
         created.append(child["id"])
     return created
@@ -464,7 +541,9 @@ def _ensure_root(store: IntentStore, full_name: str = "") -> str:
     if root:
         return root
     name = (full_name.split("/")[-1] if full_name else "") or "System"
-    return store.create_tenet(BUILDER, _humanize(name), "", None, [], {"via": "grilling"})["id"]
+    root = store.create_tenet(BUILDER, _humanize(name), "", None, [], {"via": "grilling"})["id"]
+    ensure_hypothesis(store, root, "grilling")
+    return root
 
 
 def start_grill_session(workspace_id: int, tenet_id: Optional[str] = None, full_name: str = "") -> dict:

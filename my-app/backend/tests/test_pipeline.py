@@ -42,8 +42,10 @@ def test_initial_sync_executes_pipeline_and_starts_grilling(c):
     assert len(leaf_tenets) > 0
     assert any(len(t["code_links"]) > 0 for t in leaf_tenets)
 
-    # No pre-written claims: Hypotheses come from grilling the user (spec 10.2)
-    assert claims == {}
+    # Every Tenet starts with a Hypothesis from its code; nothing is an Axiom or has a fake test
+    for t in tenets:
+        assert any(c in claims for c in t["claims"]), f"{t['name']} has no Hypothesis"
+    assert all(c["status"] == "hypothesis" and c["test_implementation"] == "" for c in claims.values())
 
     # Annotations created
     annot = c.get(url(c, "/annotations"), params={"path": "src/auth/session.py"}).json()

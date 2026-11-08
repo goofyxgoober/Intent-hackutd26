@@ -266,12 +266,7 @@ def generate_annotations_for_file(path: str, content: str) -> dict:
             f_doc = f["doc"] or f"executes {f['name'].replace('_', ' ')} logic"
             responsibilities.append(f"{f['name']}(): {f_doc}.")
 
-    if not responsibilities:
-        responsibilities = [
-            f"Maintains structural invariants and operational contracts for {stem.replace('_', ' ')}.",
-            f"Guarantees deterministic execution and state transitions across {base_name} lifecycles.",
-            "Enforces validation boundaries and prevents regression or data corruption.",
-        ]
+    # No invented filler: an empty list is more honest than boilerplate (spec 10.1).
 
     # 3. Invariants: only rules read from the code by the LLM below; none are invented here.
     invariants: List[str] = []
@@ -501,29 +496,23 @@ def generate_requirements_and_tenets(store: IntentStore, snapshot: dict, full_na
         t_obj = store.tenet(t_id)
         existing_links = {l.get("path") for l in t_obj.get("code_links", []) if l.get("path")}
         new_links = list(t_obj.get("code_links", []))
-        for p in sorted(paths)[:15]:
+        for p in sorted(paths):  # every file, so the hierarchy below covers all of the code
             if p not in existing_links:
                 new_links.append({"path": p})
                 existing_links.add(p)
         store.set_links(actor_engine, t_id, new_links)
 
-        # Create requirement claims (Hypotheses) if this tenet has no claims
-        t_obj = store.tenet(t_id)
-        if not t_obj["claims"]:
-            for cand in candidate_claims:
-                claim = store.create_claim(
-                    actor_builder,
-                    t_id,
-                    {
-                        "statement": cand["statement"],
-                        "test_explanation": cand["test_explanation"],
-                        "test_implementation": cand["test_implementation"],
-                        "dependencies": [],
-                        "confidence": 0.92,
-                        "provenance": {"via": "pipeline"},
-                    },
-                )
-                created_claims.append(claim["id"])
+        # Every new Tenet starts with a Hypothesis drawn from its code (no Axiom is required).
+        from .grill import ensure_hypothesis
+        new_claim = ensure_hypothesis(store, t_id, "pipeline")
+        if new_claim:
+            created_claims.append(new_claim)
+
+    if root_id:
+        from .grill import ensure_hypothesis
+        new_claim = ensure_hypothesis(store, root_id, "pipeline")
+        if new_claim:
+            created_claims.append(new_claim)
 
     # 3. Compile Spec document with code links and annotations
     sections = []
