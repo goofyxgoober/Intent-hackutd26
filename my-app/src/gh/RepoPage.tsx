@@ -152,7 +152,7 @@ export default function RepoPage({ owner, repo }: { owner: string; repo: string 
           <button className="btn" onClick={sync} disabled={busy}>
             sync repo
           </button>
-          <button className="btn" onClick={exportFolder} disabled={busy || !tree?.tenets.length}>
+          <button className="btn" onClick={exportFolder} disabled={busy || !wsApi}>
             export intent
           </button>
         </div>

@@ -386,7 +386,7 @@ class IntentStore:
                 t["cross_cutting"] = fields["cross_cutting"]
                 if self._has_cycle(self._composition_edges(tenets)):
                     raise conflict("That would create a reference cycle")
-            for key in ("name", "functionality"):
+            for key in ("name", "functionality", "open_unknowns"):
                 if fields.get(key) is not None:
                     t[key] = fields[key]
             if actor.is_user:

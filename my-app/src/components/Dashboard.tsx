@@ -50,6 +50,7 @@ const Icon = {
   minus: <path d="M5 12h14" />,
   plus: <path d="M12 5v14M5 12h14" />,
   sync: <path d="M20 11a8 8 0 0 0-14-4M4 5v4h4M4 13a8 8 0 0 0 14 4m2 2v-4h-4" />,
+  upload: <path d="M21 15v4a2 2 0 0 1-2 2H5a2 2 0 0 1-2-2v-4M17 8l-5-5-5 5M12 3v12" />,
   git: <path d="M9 19c-4 1-4-2-6-2m12 4v-3.500a3 3 0 0 0-1-2.500c3 0 6-1.500 6-6a4.600 4.600 0 0 0-1.300-3.200 4.200 4.200 0 0 0-.1-3.200s-1.100-.3-3.500 1.300a12 12 0 0 0-6.200 0C6.500 2.800 5.400 3.100 5.400 3.100a4.200 4.200 0 0 0-.1 3.200A4.600 4.600 0 0 0 4 9.500c0 4.600 3 6 6 6a3 3 0 0 0-1 2.500V21" />,
 };
 const Svg = ({ d, spin }: { d: keyof typeof Icon; spin?: boolean }) => (
@@ -77,14 +78,26 @@ function useMe(): Me | null | undefined {
   return me;
 }
 
-function Toolbar({ onSync, syncing, view }: { onSync(): void; syncing: boolean; view: View }) {
+function Toolbar({
+  onSync,
+  syncing,
+  onExport,
+  exporting,
+  view,
+}: {
+  onSync(): void;
+  syncing: boolean;
+  onExport(): void;
+  exporting: boolean;
+  view: View;
+}) {
   const { zoom } = useViewport();
   const { zoomIn, zoomOut, fitView } = useReactFlow();
   const me = useMe();
   return (
     <div className="toolbar">
       <span className="tb-hint" aria-hidden>
-        <kbd>click</kbd> {view === "graph" ? "a node" : "a tenet"} <kbd>/</kbd> ask <kbd>esc</kbd> clear
+        <kbd>click</kbd> {view === "graph" ? "a codebase node" : "a tenet"} <kbd>/</kbd> ask <kbd>esc</kbd> clear
       </span>
       <div className="tb-group" role="group" aria-label="Zoom">
         <button onClick={() => zoomOut({ duration: 150 })} aria-label="Zoom out"><Svg d="minus" /></button>
@@ -102,6 +115,14 @@ function Toolbar({ onSync, syncing, view }: { onSync(): void; syncing: boolean; 
           <img src={me.avatar_url} alt="" width={22} height={22} />
         </a>
       ) : null}
+      <button
+        className="tb-ghost"
+        onClick={onExport}
+        disabled={exporting || syncing}
+        title="Export intent files (.intentflow) to GitHub repo"
+      >
+        <Svg d="upload" spin={exporting} /> {exporting ? "Exporting…" : "Export intent"}
+      </button>
       <button className={`tb-primary ${syncing ? "syncing" : ""}`} onClick={onSync} disabled={syncing}>
         <Svg d="sync" spin={syncing} /> {syncing ? "Syncing" : "Sync repo"}
       </button>
@@ -152,7 +173,7 @@ function StatusBar({ g, focus, view, tenets }: { g: IntentGraphState; focus: Foc
         {view === "tenets" ? (
           tenets.tree ? `“${ts.n} tenets · ${ts.a} axioms locked · ${ts.h} hypotheses open”` : tenets.status === "signin" ? "“sign in to load the tenet hierarchy”" : "“reading the tenet tree…”"
         ) : g.index
-          ? `“${g.index.repo}: ${g.index.nodes.size} intent nodes across ${boundaries} boundaries”`
+          ? `“${g.index.repo}: ${g.index.nodes.size} codebase nodes across ${boundaries} boundaries”`
           : g.status === "error"
             ? "“graph unavailable”"
             : "“distilling ast…”"}
@@ -193,7 +214,7 @@ function Workspace() {
   useEffect(() => {
     if (g.status === "ready" && g.index) {
       const b = new Set([...g.index.nodes.values()].map(boundaryOf)).size;
-      print(`  ✓ mapped ${g.index.nodes.size} intent nodes · ${g.index.edges.length} edges · ${b} boundaries`, "success");
+      print(`  ✓ mapped ${g.index.nodes.size} codebase nodes · ${g.index.edges.length} edges · ${b} boundaries`, "success");
       const dangling = [...g.index.dangling.values()].flat().length;
       if (dangling) print(`  ${dangling} dependency reference(s) point outside the graph`, "muted");
     }
@@ -228,27 +249,102 @@ function Workspace() {
 
   /** Jump to a tenet in the hierarchy view, lighting up its path from the root. */
   const openTenet = useCallback(
-    (id: string | null) => {
+    (id: string | null, log = false) => {
       setTenetId(id);
       setClaimId(null);
+      setSelectedId(null);
       setTenetHit(id ? ancestry(id) : null);
       if (id) setView("tenets");
+
+      if (id && tenets.tree) {
+        const t = tenets.tree.tenets.find((x) => x.id === id);
+        if (t) {
+          const clms = t.claims.map((cid) => tenets.tree!.claims[cid]).filter(Boolean);
+          const axioms = clms.filter((c) => c.status === "axiom").length;
+          const hyps = clms.filter((c) => c.status === "hypothesis").length;
+          const codeFiles = t.code_links.length;
+
+          const tenetContext = [
+            `TENET: ${t.name} (ID: ${t.id}, Level: ${t.level}, Rollup: ${t.rollup})`,
+            `Functionality: ${t.functionality || "(none)"}`,
+            `Claims (${clms.length}):`,
+            ...clms.map((c) => `  - [${c.status}] ${c.statement} (${c.result.verdict}, ${Math.round(c.confidence * 100)}%)`),
+            `Code links: ${t.code_links.map((l) => l.path).join(", ") || "(none)"}`,
+          ].join("\n");
+          const estTokens = Math.max(20, Math.round(tenetContext.length / 4));
+
+          const graphNodes = graphNodesFor(g.index, tenets.tree, t.id);
+          setFocus({
+            kind: "neighborhood",
+            label: `tenet: ${t.name}`,
+            nodeIds: new Set(graphNodes.map((n) => n.id)),
+            edgeIds: new Set(),
+            scores: new Map(graphNodes.map((n) => [n.id, 1.0])),
+            hits: graphNodes.map((n) => ({ node_id: n.id, score: 1.0, hop: 0, matched: ["tenet"] })),
+            context: tenetContext,
+            tokens: estTokens,
+          });
+
+          if (log) {
+            setTermOpen(true);
+            setTermMin(false);
+            print(["", `${prompt}:~$ inspect ${t.name}`], "prompt");
+            print(`  bound ${t.name} (L${t.level}) · ${axioms} axiom(s) · ${hyps} hypothesis(es) · ${codeFiles} file(s) · ~${estTokens} tokens retrieved`);
+            clms.slice(0, 3).forEach((c) => {
+              print(`  ${c.status === "axiom" ? "◆ A" : "· H"}: ${c.statement}`, c.status === "axiom" ? "accent" : "plain");
+            });
+          }
+        }
+      }
     },
-    [ancestry, setView],
+    [ancestry, setView, tenets.tree, g.index, print, prompt],
   );
 
   /** Open one axiom/hypothesis in the detail drawer (and select its tenet). */
   const openClaim = useCallback(
-    (id: string | null) => {
+    (id: string | null, log = false) => {
       const c = id ? tenets.tree?.claims[id] : null;
       setClaimId(c ? id : null);
+      setSelectedId(null);
       if (c) {
         setTenetId(c.tenet_id);
         setTenetHit(null);
         setView("tenets");
+
+        const t = tenets.tree?.tenets.find((x) => x.id === c.tenet_id);
+        const claimContext = [
+          `CLAIM: ${c.id} (${c.status.toUpperCase()})`,
+          `Tenet: ${t?.name ?? c.tenet_id}`,
+          `Statement: ${c.statement}`,
+          `What the test checks: ${c.test_explanation || "(none)"}`,
+          `Implementation recipe: ${c.test_implementation || "(none)"}`,
+          `Confidence: ${Math.round(c.confidence * 100)}%`,
+          `Dependencies: ${c.dependencies.join(", ") || "(none)"}`,
+        ].join("\n");
+        const estTokens = Math.max(15, Math.round(claimContext.length / 4));
+
+        const graphNodes = t ? graphNodesFor(g.index, tenets.tree, t.id) : [];
+        setFocus({
+          kind: "neighborhood",
+          label: `claim: ${c.id}`,
+          nodeIds: new Set(graphNodes.map((n) => n.id)),
+          edgeIds: new Set(),
+          scores: new Map(graphNodes.map((n) => [n.id, 1.0])),
+          hits: graphNodes.map((n) => ({ node_id: n.id, score: 1.0, hop: 0, matched: ["claim"] })),
+          context: claimContext,
+          tokens: estTokens,
+        });
+
+        if (log) {
+          setTermOpen(true);
+          setTermMin(false);
+          print(["", `${prompt}:~$ inspect claim ${c.id}`], "prompt");
+          print(`  bound [${c.status}] ${c.id} · ${c.result.verdict} · confidence ${Math.round(c.confidence * 100)}% · Tenet: ${t?.name ?? c.tenet_id}`);
+          print(`  statement: ${c.statement}`);
+        }
       }
     },
-    [tenets.tree, setView],
+    [tenets.tree, setView, g.index, print, prompt],
   );
 
   /** Jump from a tenet to the graph nodes that implement it. */
@@ -290,6 +386,10 @@ function Workspace() {
   const select = useCallback(
     async (id: string | null, log = false) => {
       setSelectedId(id);
+      if (id) {
+        setTenetId(null);
+        setClaimId(null);
+      }
       if (!id) return setFocus(null);
       const f = await query(id, { seeds: [id], hops: 1, maxNodes: 12 }, "neighborhood");
       if (log && f && g.index) {
@@ -324,14 +424,24 @@ function Workspace() {
         tenets: tenets.tree,
         view,
         setView,
-        selectTenet: openTenet,
-        openClaim,
+        selectTenet: (id) => openTenet(id, true),
+        openClaim: (id) => openClaim(id, true),
         selection: {
           view: view === "tenets" ? "intent" : "codebase",
-          tenet_id: tenetId,
-          claim_id: openClaimId,
-          file: selectedId ? (g.index?.nodes.get(selectedId)?.source_file ?? null) : null,
+          tenet_id: view === "tenets" ? tenetId : null,
+          claim_id: view === "tenets" ? openClaimId : null,
+          file: view === "tenets"
+            ? (tenetId && tenets.tree ? tenets.tree.tenets.find((x) => x.id === tenetId)?.code_links?.[0]?.path ?? null : null)
+            : (selectedId ? (g.index?.nodes.get(selectedId)?.source_file ?? null) : null),
+          node_id: view === "graph" ? selectedId : null,
+          target_id: view === "tenets" ? (openClaimId || tenetId) : selectedId,
+          name: view === "tenets"
+            ? (openClaimId && tenets.tree ? tenets.tree.claims[openClaimId]?.statement : (tenetId && tenets.tree ? tenets.tree.tenets.find(x => x.id === tenetId)?.name : null))
+            : (selectedId ? g.index?.nodes.get(selectedId)?.name : null),
+          claim_statement: view === "tenets" && openClaimId && tenets.tree ? tenets.tree.claims[openClaimId]?.statement ?? null : null,
         },
+        wsApi: tenets.wsApi,
+        updateTree: tenets.updateTree,
         fit: () => fitView({ padding: 0.12, duration: 300 }),
       };
       setBusy(true);
@@ -366,6 +476,34 @@ function Workspace() {
   }, [select]);
 
   const syncing = g.status === "syncing" || g.status === "loading";
+  const [exporting, setExporting] = useState(false);
+
+  const onExport = useCallback(async () => {
+    if (!tenets.wsApi) {
+      print("  ✗ Cannot export: workspace is not connected (sign in and connect a repository first)", "error");
+      return;
+    }
+    setExporting(true);
+    print(["", `${prompt}:~$ export intent`], "prompt");
+    try {
+      const res = await tenets.wsApi.exportFolder();
+      if (res.changed) {
+        print([
+          `  ✓ successfully exported ${res.files} intent files to branch: ${res.branch}`,
+          `  commit: ${res.commit_sha.slice(0, 7)}`,
+        ], "success");
+      } else {
+        print([
+          `  ✓ nothing changed since last export (${res.branch})`,
+          `  latest commit: ${res.commit_sha.slice(0, 7)}`,
+        ], "muted");
+      }
+    } catch (e: any) {
+      print(`  ✗ export failed: ${e.message || e}`, "error");
+    } finally {
+      setExporting(false);
+    }
+  }, [tenets.wsApi, print, prompt]);
 
   return (
     <main className="workspace">
@@ -379,7 +517,13 @@ function Workspace() {
             </li>
           ))}
         </ol>
-        <Toolbar onSync={() => run("sync")} syncing={syncing} view={view} />
+        <Toolbar
+          onSync={() => run("sync")}
+          syncing={syncing}
+          onExport={onExport}
+          exporting={exporting}
+          view={view}
+        />
       </header>
 
       <div className="viewport">
@@ -389,11 +533,7 @@ function Workspace() {
               tree={tenets.tree}
               selectedId={tenetId}
               highlight={tenetHit}
-              onSelect={(id) => {
-                setTenetId(id);
-                setClaimId(null);
-                setTenetHit(null);
-              }}
+              onSelect={(id) => openTenet(id, true)}
               insets={{
                 left: termOpen && !termMin && window.innerWidth > 900 ? 570 : 40,
                 right: openClaimId ? 520 : tenetId ? 450 : 40,
@@ -481,10 +621,11 @@ function Workspace() {
             setClaimId(null);
             setTenetId(null);
           }}
-          onOpenClaim={openClaim}
-          onOpenTenet={openTenet}
+          onOpenClaim={(id) => openClaim(id, true)}
+          onOpenTenet={(id) => openTenet(id, true)}
           onChanged={() => void tenets.reload()}
           say={(t, tone) => print(t, tone)}
+          updateTree={tenets.updateTree}
         />
       ) : view === "tenets" && tenetId && tenets.tree ? (
         <TenetInspector
@@ -493,14 +634,17 @@ function Workspace() {
           wsApi={tenets.wsApi}
           graphNodes={graphNodesFor(g.index, tenets.tree, tenetId)}
           activeClaim={null}
-          onOpenClaim={openClaim}
-          onSelect={(id) => {
-            setTenetId(id);
-            setTenetHit(id ? ancestry(id) : null);
-          }}
+          onOpenClaim={(id) => openClaim(id, true)}
+          onSelect={(id) => openTenet(id, true)}
           onShowInGraph={showTenetInGraph}
           onChanged={() => void tenets.reload()}
           say={(t, tone) => print(t, tone)}
+          updateTree={tenets.updateTree}
+          onGenerateTests={(id) => {
+            setTermOpen(true);
+            setTermMin(false);
+            void run(`tests ${id}`);
+          }}
         />
       ) : null}
 
@@ -510,12 +654,23 @@ function Workspace() {
           nodeId={selectedId}
           focus={focus}
           tenets={tenetsForNode(tenets.tree, selectedId, g.index.nodes.get(selectedId)?.source_file ?? "")}
-          onOpenTenet={openTenet}
+          onOpenTenet={(id) => openTenet(id, true)}
           onSelect={(id) => void select(id, true)}
-          onGenerateTests={(id) => {
-            setTermOpen(true);
-            setTermMin(false);
-            void run(`tests ${id}`);
+          onUpdateNode={async (nodeId, updated) => {
+            if (g.index) {
+              const node = g.index.nodes.get(nodeId);
+              if (node) {
+                Object.assign(node, updated);
+                try {
+                  await fetch("/api/graph/nodes", {
+                    method: "POST",
+                    headers: { "Content-Type": "application/json" },
+                    body: JSON.stringify(node),
+                  });
+                } catch {}
+                void select(nodeId, false);
+              }
+            }
           }}
         />
       ) : null}

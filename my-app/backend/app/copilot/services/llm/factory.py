@@ -31,7 +31,10 @@ class AgentFactory:
         Retrieves or instantiates the requested LLM agent.
         Defaults to GEMINI (or environment variable LLM_PROVIDER).
         """
-        chosen_provider = (provider or os.getenv("LLM_PROVIDER", "gemini")).lower()
+        # Prioritize NVIDIA Nemotron whenever NVIDIA_API_KEY is available
+        has_nvidia = bool(os.getenv("NVIDIA_API_KEY"))
+        default_provider = "nemotron" if has_nvidia else "gemini"
+        chosen_provider = (provider or os.getenv("LLM_PROVIDER", default_provider)).lower()
         
         # If special graph_store is provided, instantiate fresh
         if graph_store:

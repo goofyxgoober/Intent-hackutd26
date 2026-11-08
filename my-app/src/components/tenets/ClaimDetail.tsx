@@ -19,6 +19,7 @@ interface Props {
   onOpenTenet(id: string): void;
   onChanged(): void;
   say(text: string, tone?: "success" | "error" | "muted"): void;
+  updateTree?(updater: (prev: TreeView) => TreeView): void;
 }
 
 
@@ -28,7 +29,7 @@ interface Props {
  * Status changes are two-phase: the impact is shown first, then the user confirms.
  * Mount with key={claimId} so panel state resets between claims.
  */
-export function ClaimDetail({ tree, claimId, wsApi, onBack, onClose, onOpenClaim, onOpenTenet, onChanged, say }: Props) {
+export function ClaimDetail({ tree, claimId, wsApi, onBack, onClose, onOpenClaim, onOpenTenet, onChanged, say, updateTree }: Props) {
   const claim = tree.claims[claimId];
   const [panel, setPanel] = useState<Panel>(null);
   const [impact, setImpact] = useState<Impact | null>(null);
@@ -41,6 +42,8 @@ export function ClaimDetail({ tree, claimId, wsApi, onBack, onClose, onOpenClaim
     statement: claim?.statement ?? "",
     test_explanation: claim?.test_explanation ?? "",
     test_implementation: claim?.test_implementation ?? "",
+    confidence: claim?.confidence ?? 0.8,
+    dependencies: claim?.dependencies ?? [],
   }));
   const [rejectedText, setRejectedText] = useState(claim?.statement ?? "");
 
@@ -135,6 +138,48 @@ export function ClaimDetail({ tree, claimId, wsApi, onBack, onClose, onOpenClaim
       <textarea value={form.test_explanation} onChange={(e) => setForm({ ...form, test_explanation: e.target.value })} />
       <label>implementation recipe</label>
       <textarea className="tall" value={form.test_implementation} onChange={(e) => setForm({ ...form, test_implementation: e.target.value })} />
+      <label>confidence ({Math.round(form.confidence * 100)}%)</label>
+      <input
+        type="range"
+        min="0"
+        max="1"
+        step="0.05"
+        value={form.confidence}
+        onChange={(e) => setForm({ ...form, confidence: parseFloat(e.target.value) })}
+      />
+      <label>dependencies ({form.dependencies.length})</label>
+      <div style={{ display: "flex", flexWrap: "wrap", gap: 4, marginBottom: 4 }}>
+        {form.dependencies.map((depId) => (
+          <span key={depId} style={{ background: "rgba(255,255,255,0.08)", padding: "2px 6px", borderRadius: 10, fontSize: 11, display: "inline-flex", alignItems: "center", gap: 4 }}>
+            {depId}
+            <button
+              type="button"
+              style={{ background: "none", border: "none", color: "inherit", cursor: "pointer", padding: 0 }}
+              onClick={() => setForm({ ...form, dependencies: form.dependencies.filter((d) => d !== depId) })}
+            >
+              ×
+            </button>
+          </span>
+        ))}
+      </div>
+      <select
+        style={{ width: "100%", padding: "4px 8px", background: "rgba(0,0,0,0.2)", border: "1px solid var(--border)", borderRadius: 4, color: "inherit", fontSize: 12 }}
+        value=""
+        onChange={(e) => {
+          if (e.target.value && !form.dependencies.includes(e.target.value)) {
+            setForm({ ...form, dependencies: [...form.dependencies, e.target.value] });
+          }
+        }}
+      >
+        <option value="">+ Add dependency claim…</option>
+        {Object.values(tree.claims)
+          .filter((c) => c.id !== claim.id && !form.dependencies.includes(c.id))
+          .map((c) => (
+            <option key={c.id} value={c.id}>
+              {c.id} - {c.statement.slice(0, 45)}...
+            </option>
+          ))}
+      </select>
     </>
   );
 
@@ -280,9 +325,30 @@ export function ClaimDetail({ tree, claimId, wsApi, onBack, onClose, onOpenClaim
               className="act go"
               disabled={busy || !form.statement.trim() || (isAxiom && (!understood || !reason.trim()))}
               onClick={() =>
-                void act(isAxiom ? "axiom edited by hand (now unverified)" : "hypothesis saved", () =>
-                  isAxiom ? wsApi!.editAxiom(claim.id, form, reason) : wsApi!.editHypothesis(claim.id, form),
-                )
+                void act(isAxiom ? "axiom edited by hand (now unverified)" : "hypothesis saved", async () => {
+                  if (wsApi) {
+                    if (isAxiom) {
+                      await wsApi.editAxiom(claim.id, form, reason);
+                    } else {
+                      await wsApi.editHypothesis(claim.id, form);
+                    }
+                  }
+                  if (updateTree) {
+                    updateTree((prev) => ({
+                      ...prev,
+                      claims: {
+                        ...prev.claims,
+                        [claim.id]: {
+                          ...claim,
+                          ...form,
+                          status: isAxiom ? "axiom" : claim.status,
+                          verification: isAxiom ? "unverified_edit" : claim.verification,
+                          version: claim.version + 1,
+                        },
+                      },
+                    }));
+                  }
+                })
               }
             >
               save

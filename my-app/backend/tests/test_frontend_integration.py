@@ -276,3 +276,76 @@ def test_interactive_grilling_and_chatbot_flow():
     assert "Answer Recorded" in chat_resp["answer"] or "Question" in chat_resp["answer"]
 
 
+def test_tenet_and_node_modification():
+    """Verify modification of tenets, claims, and codebase intent nodes."""
+    from app import db, sessions
+    from app.config import settings
+
+    user = {"id": 9999, "login": "mod-tester", "avatar_url": "https://example.com/avatar.png"}
+    user_id = db.upsert_user(user["id"], user["login"])
+    sid = sessions.create_session("dev_token", user, user_id)
+    auth_client = TestClient(app, cookies={settings.session_cookie: sid})
+
+    # Connect repo and run initial pipeline
+    r_conn = auth_client.post("/api/repos/mod-org/mod-repo/connect")
+    assert r_conn.status_code == 200
+    ws_id = r_conn.json()["id"]
+
+    # Read tree
+    tree_res = auth_client.get(f"/api/workspaces/{ws_id}/tree")
+    assert tree_res.status_code == 200
+    tree = tree_res.json()
+    root_id = tree["root_id"]
+
+    if root_id:
+        # Test modifying tenet name and open unknowns
+        mod_res = auth_client.patch(f"/api/workspaces/{ws_id}/tenets/{root_id}", json={
+            "name": "Modified Root Tenet",
+            "functionality": "Updated functionality statement",
+            "open_unknowns": ["Does session token expire after 15m or 1h?"]
+        })
+        assert mod_res.status_code == 200
+        data = mod_res.json()
+        assert data["name"] == "Modified Root Tenet"
+        assert data["functionality"] == "Updated functionality statement"
+        assert "Does session token expire after 15m or 1h?" in data["open_unknowns"]
+
+        # Test adding a claim to this tenet
+        claim_res = auth_client.post(f"/api/workspaces/{ws_id}/tenets/{root_id}/claims", json={
+            "statement": "Charges over $10,000 must flag as FRAUD_HOLD",
+            "test_explanation": "Prevents large unauthorized payments",
+            "test_implementation": "INVOKE billing. ASSERT charge_status == FRAUD_HOLD",
+            "confidence": 0.85
+        })
+        assert claim_res.status_code == 201
+        claim_id = claim_res.json()["id"]
+
+        # Test modifying the hypothesis
+        hyp_res = auth_client.patch(f"/api/workspaces/{ws_id}/claims/{claim_id}", json={
+            "statement": "Charges strictly over $10,000 enter FRAUD_HOLD",
+            "confidence": 0.95
+        })
+        assert hyp_res.status_code == 200
+        assert hyp_res.json()["confidence"] == 0.95
+        assert hyp_res.json()["statement"] == "Charges strictly over $10,000 enter FRAUD_HOLD"
+
+    # Test modifying an IntentNode in the graph
+    node_res = client.post("/api/graph/nodes", json={
+        "node_id": "auth_flow_validate_session",
+        "name": "Updated Validate Session",
+        "source_file": "src/legacy/auth/session.py",
+        "intent_summary": "Cryptographic HMAC check with IP binding",
+        "business_invariants": [
+            "Expired session tokens immediately reject with 401 Unauthorized.",
+            "IP mismatch triggers immediate session revocation."
+        ],
+        "inputs": {"auth_header": "Bearer token"},
+        "outputs": {"user_context": "Hydrated user principal"}
+    })
+    assert node_res.status_code == 200
+    node_data = node_res.json()
+    assert node_data["name"] == "Updated Validate Session"
+    assert len(node_data["business_invariants"]) == 2
+
+
+

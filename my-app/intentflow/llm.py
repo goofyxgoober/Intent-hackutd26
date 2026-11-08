@@ -11,9 +11,9 @@ from .models import StructuredFailure
 T = TypeVar("T", bound=BaseModel)
 
 MODELS = {
-    "deep": os.getenv("NEMOTRON_DEEP", "nvidia/nemotron-3-ultra-550b-a55b"),
-    "mid":  os.getenv("NEMOTRON_MID",  "nvidia/nemotron-3-super-120b-a12b"),
-    "fast": os.getenv("NEMOTRON_FAST", "nvidia/nemotron-3-nano-30b-a3b"),
+    "deep": os.getenv("NEMOTRON_DEEP", "nvidia/nemotron-3.5-lightning-30b-a3b"),
+    "mid":  os.getenv("NEMOTRON_MID",  "nvidia/nemotron-3.5-lightning-30b-a3b"),
+    "fast": os.getenv("NEMOTRON_FAST", "nvidia/nemotron-3-nano-omni-30b-a3b-reasoning"),
 }
 
 # Token tracking registry for Section 13 Token Counter
@@ -49,7 +49,7 @@ class Nemotron:
         if client is not None:
             self.client = client
         else:
-            api_key = os.getenv("JEV_API_KEY") or os.getenv("NVIDIA_API_KEY", "dummy_key")
+            api_key = os.getenv("NVIDIA_API_KEY") or (os.getenv("JEV_API_KEY") if not (os.getenv("JEV_API_KEY") or "").startswith("apikey_") else None) or "dummy_key"
             base_url = os.getenv("NEMOTRON_BASE_URL", "https://integrate.api.nvidia.com/v1")
             self.client = AsyncOpenAI(base_url=base_url, api_key=api_key, timeout=300)
 

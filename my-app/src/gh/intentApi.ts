@@ -101,10 +101,27 @@ export function workspaceApi(id: number) {
     tree: () => api<TreeView>(`${base}/tree`),
     createTenet: (name: string, functionality: string, parent_id: string | null) =>
       post<Tenet>("/tenets", { name, functionality, parent_id, provenance: { via: "manual" } }),
-    updateTenet: (id: string, fields: Partial<Pick<Tenet, "name" | "functionality">>) =>
+    updateTenet: (id: string, fields: Partial<Pick<Tenet, "name" | "functionality" | "cross_cutting" | "children" | "open_unknowns">>) =>
       api<Tenet>(`${base}/tenets/${id}`, { method: "PATCH", body: JSON.stringify(fields) }),
-    createClaim: (tenet: string, fields: Pick<Claim, "statement" | "test_explanation" | "test_implementation">) =>
-      post<Claim>(`/tenets/${tenet}/claims`, { ...fields, provenance: { via: "manual" } }),
+    moveTenet: (id: string, parent_id: string) =>
+      post<Tenet>(`/tenets/${id}/move`, { parent_id }),
+    deleteTenet: (id: string) =>
+      api<void>(`${base}/tenets/${id}`, { method: "DELETE" }),
+    addReference: (id: string, target: string) =>
+      post<Tenet>(`/tenets/${id}/references`, { target }),
+    removeReference: (id: string, target: string) =>
+      api<Tenet>(`${base}/tenets/${id}/references/${encodeURIComponent(target)}`, { method: "DELETE" }),
+    setLinks: (id: string, links: Array<{ path: string; start_line?: number; end_line?: number; symbol?: string }>) =>
+      api<Tenet>(`${base}/tenets/${id}/links`, { method: "PUT", body: JSON.stringify(links) }),
+    createClaim: (tenet: string, fields: Partial<Pick<Claim, "statement" | "test_explanation" | "test_implementation" | "dependencies" | "confidence">>) =>
+      post<Claim>(`/tenets/${tenet}/claims`, {
+        statement: fields.statement ?? "New Claim",
+        test_explanation: fields.test_explanation ?? "",
+        test_implementation: fields.test_implementation ?? "",
+        dependencies: fields.dependencies ?? [],
+        confidence: fields.confidence ?? 0.5,
+        provenance: { via: "manual" },
+      }),
     editHypothesis: (id: string, fields: Partial<Claim>) =>
       api<Claim>(`${base}/claims/${id}`, { method: "PATCH", body: JSON.stringify(fields) }),
     editAxiom: (id: string, fields: Partial<Claim>, reason: string) =>

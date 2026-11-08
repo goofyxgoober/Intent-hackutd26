@@ -33,6 +33,7 @@ class TenetUpdate(BaseModel):
     functionality: Optional[str] = None
     children: Optional[List[str]] = None  # reorder only; same set of ids
     cross_cutting: Optional[List[str]] = None
+    open_unknowns: Optional[List[str]] = None
 
 
 class ClaimFields(BaseModel):

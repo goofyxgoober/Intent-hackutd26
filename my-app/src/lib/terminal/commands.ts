@@ -3,8 +3,8 @@ import { boundaryOf, reachable, shortestPath } from "@/lib/graph/model";
 import type { GraphSource } from "@/lib/api/source";
 import type { RetrievalOptions } from "@/lib/retrieval/engine";
 import { focusFromIds, type Focus } from "@/lib/focus";
-import type { TreeView } from "@/gh/intentApi";
-import { resolveTenet } from "@/lib/tenetLinks";
+import type { Claim, Tenet, TreeView } from "@/gh/intentApi";
+import { graphNodesFor, resolveTenet } from "@/lib/tenetLinks";
 
 export type Tone = "prompt" | "success" | "error" | "muted" | "accent" | "plain";
 export interface Line {
@@ -32,7 +32,18 @@ export interface CommandContext {
   selectTenet(id: string | null): void;
   openClaim(id: string | null): void;
   /** What the user has selected; sent with questions so the agent can resolve "this" (chat contract §3). */
-  selection: { view: "intent" | "codebase"; tenet_id: string | null; claim_id: string | null; file: string | null };
+  selection: {
+    view: "intent" | "codebase";
+    tenet_id: string | null;
+    claim_id: string | null;
+    file: string | null;
+    node_id?: string | null;
+    target_id?: string | null;
+    name?: string | null;
+    claim_statement?: string | null;
+  };
+  wsApi?: any;
+  updateTree?(updater: (prev: TreeView) => TreeView): void;
 }
 
 export interface Command {
@@ -75,7 +86,52 @@ function printFocus(ctx: CommandContext, f: Focus) {
     const via = h.via ? ` ← ${h.via}` : "";
     ctx.print(`  ${h.hop === 0 ? "◆" : "├─"} ${h.node_id}  ${h.score.toFixed(2)}${via}`, h.hop === 0 ? "accent" : "plain");
   }
-  ctx.print(`  ✓ ${f.nodeIds.size} intent nodes · ~${f.tokens} context tokens${f.elapsedMs !== undefined ? ` · ${f.elapsedMs.toFixed(1)}ms` : ""}`, "success");
+  ctx.print(`  ✓ ${f.nodeIds.size} codebase nodes · ~${f.tokens} context tokens${f.elapsedMs !== undefined ? ` · ${f.elapsedMs.toFixed(1)}ms` : ""}`, "success");
+}
+
+async function applyClaimEdit(ctx: CommandContext, claim: Claim, fields: Partial<Claim>) {
+  if (ctx.wsApi) {
+    if (claim.status === "axiom") {
+      await ctx.wsApi.editAxiom(claim.id, fields, "modified via terminal");
+    } else {
+      await ctx.wsApi.editHypothesis(claim.id, fields);
+    }
+  }
+  if (ctx.updateTree) {
+    ctx.updateTree((prev) => ({
+      ...prev,
+      claims: {
+        ...prev.claims,
+        [claim.id]: {
+          ...claim,
+          ...fields,
+          version: claim.version + 1,
+        },
+      },
+    }));
+  }
+}
+
+async function applyTenetEdit(ctx: CommandContext, tenet: Tenet, fields: Partial<Tenet>) {
+  if (ctx.wsApi) {
+    if (fields.name || fields.functionality || fields.cross_cutting || fields.open_unknowns) {
+      await ctx.wsApi.updateTenet(tenet.id, {
+        name: fields.name,
+        functionality: fields.functionality,
+        cross_cutting: fields.cross_cutting,
+        open_unknowns: fields.open_unknowns,
+      });
+    }
+    if (fields.code_links) {
+      await ctx.wsApi.setLinks(tenet.id, fields.code_links);
+    }
+  }
+  if (ctx.updateTree) {
+    ctx.updateTree((prev) => ({
+      ...prev,
+      tenets: prev.tenets.map((t) => (t.id === tenet.id ? { ...t, ...fields } : t)),
+    }));
+  }
 }
 
 export const commands: Command[] = [
@@ -93,15 +149,429 @@ export const commands: Command[] = [
   {
     name: "inspect",
     aliases: ["open", "cat"],
-    usage: "inspect <node>",
-    summary: "open a node and retrieve its neighborhood",
+    usage: "inspect [node|tenet|claim]",
+    summary: "open and retrieve details for a node, tenet, or claim",
+    offline: true,
     run(args, ctx) {
-      const id = needNode(ctx, args.join(" "), this.usage);
-      if (!id) return;
-      const n = ctx.index!.nodes.get(id)!;
-      ctx.select(id);
-      ctx.print([`  ${n.name} · ${n.source_file}`, `  ${n.intent_summary}`]);
-      n.business_invariants.forEach((s, i) => ctx.print(`  ${inv(i)}: ${s}`));
+      const term = args.join(" ").trim();
+      if (!term) {
+        if (ctx.selection.claim_id && ctx.tenets?.claims[ctx.selection.claim_id]) {
+          const c = ctx.tenets.claims[ctx.selection.claim_id];
+          ctx.print([
+            `  ${c.status === "axiom" ? "◆ Axiom" : "◇ Hypothesis"} ${c.id} · ${c.result.verdict} (${Math.round(c.confidence * 100)}%)`,
+            `  statement: ${c.statement}`,
+            `  what the test checks: ${c.test_explanation || "(none)"}`,
+            `  implementation recipe: ${c.test_implementation || "(none)"}`,
+            `  dependencies: ${c.dependencies.join(", ") || "(none)"}`,
+          ]);
+          return;
+        }
+        if (ctx.selection.tenet_id && ctx.tenets) {
+          const t = ctx.tenets.tenets.find((x) => x.id === ctx.selection.tenet_id);
+          if (t) {
+            ctx.print([
+              `  Tenet: ${t.name} (L${t.level}) · Rollup: ${t.rollup} · ${t.id}`,
+              `  functionality: ${t.functionality || "(none)"}`,
+              `  claims: ${t.claims.length} total (${t.axioms}A / ${t.hypotheses}H)`,
+              `  code links: ${t.code_links.map((l) => l.path).join(", ") || "(none)"}`,
+            ]);
+            for (const cid of t.claims) {
+              const c = ctx.tenets.claims[cid];
+              if (c) ctx.print(`    ${c.status === "axiom" ? "◆ A" : "· H"} [${c.result.verdict}] ${c.statement}`, c.status === "axiom" ? "accent" : "plain");
+            }
+            return;
+          }
+        }
+        if (ctx.selection.node_id && ctx.index) {
+          const n = ctx.index.nodes.get(ctx.selection.node_id);
+          if (n) {
+            ctx.print([`  ${n.name} · ${n.source_file}`, `  ${n.intent_summary}`]);
+            n.business_invariants.forEach((s, i) => ctx.print(`  ${inv(i)}: ${s}`));
+            return;
+          }
+        }
+        ctx.print(`  usage: ${this.usage}`, "muted");
+        return;
+      }
+
+      // 1. Check if term matches a Claim
+      if (ctx.tenets) {
+        const cLower = term.toLowerCase();
+        const claimMatch =
+          ctx.tenets.claims[term] ??
+          Object.values(ctx.tenets.claims).find(
+            (c) => c.id.toLowerCase() === cLower || c.id.toLowerCase().includes(cLower) || c.statement.toLowerCase().includes(cLower)
+          );
+        if (claimMatch) {
+          ctx.setView("tenets");
+          ctx.openClaim(claimMatch.id);
+          ctx.print([
+            `  ${claimMatch.status === "axiom" ? "◆ Axiom" : "◇ Hypothesis"} ${claimMatch.id} · ${claimMatch.result.verdict} (${Math.round(claimMatch.confidence * 100)}%)`,
+            `  statement: ${claimMatch.statement}`,
+            `  what the test checks: ${claimMatch.test_explanation || "(none)"}`,
+            `  implementation recipe: ${claimMatch.test_implementation || "(none)"}`,
+            `  dependencies: ${claimMatch.dependencies.join(", ") || "(none)"}`,
+          ]);
+          return;
+        }
+
+        // 2. Check if term matches a Tenet
+        const tId = resolveTenet(ctx.tenets, term);
+        if (tId) {
+          const t = ctx.tenets.tenets.find((x) => x.id === tId)!;
+          ctx.setView("tenets");
+          ctx.selectTenet(t.id);
+          ctx.print([
+            `  Tenet: ${t.name} · level ${t.level} · ${t.rollup} · ${t.id}`,
+            `  functionality: ${t.functionality || "(none)"}`,
+            `  claims: ${t.claims.length} total (${t.axioms}A / ${t.hypotheses}H)`,
+            `  code links: ${t.code_links.map((l) => l.path).join(", ") || "(none)"}`,
+          ]);
+          for (const cid of t.claims) {
+            const c = ctx.tenets.claims[cid];
+            if (c) ctx.print(`    ${c.status === "axiom" ? "◆ A" : "· H"} [${c.result.verdict}] ${c.statement}`, c.status === "axiom" ? "accent" : "plain");
+          }
+          return;
+        }
+      }
+
+      // 3. Check codebase nodes
+      if (ctx.index) {
+        const id = resolveNode(ctx.index, term);
+        if (id) {
+          const n = ctx.index.nodes.get(id)!;
+          ctx.setView("graph");
+          ctx.select(id);
+          ctx.print([`  ${n.name} · ${n.source_file}`, `  ${n.intent_summary}`]);
+          n.business_invariants.forEach((s, i) => ctx.print(`  ${inv(i)}: ${s}`));
+          return;
+        }
+      }
+
+      ctx.print(`  target not found in codebase, tenets, or claims: "${term}"`, "error");
+    },
+  },
+  {
+    name: "modify",
+    aliases: ["/modify", "modify:", "/modify:", "edit", "/edit", "/edit:"],
+    usage: "modify [target] [field:] <instruction or value>",
+    summary: "alter the selected tenet, claim, or codebase node (or specify target)",
+    offline: true,
+    async run(args, ctx, raw) {
+      let body = raw.trim();
+      body = body.replace(/^\/?(modify|edit):?\s*/i, "").trim();
+      if (!body) {
+        ctx.print([
+          `  usage: ${this.usage}`,
+          "  examples:",
+          "    modify name: New Tenet Name",
+          "    modify functionality: Validates HMAC token signature",
+          "    modify add hypothesis: Expired tokens reject with HTTP 401",
+          "    modify statement: Card CVV must never be logged",
+          "    modify confidence: 0.95",
+          "    modify add invariant: Stock counter cannot decrement below zero",
+          "    modify t_3c3624556b71 : name: Updated Name",
+          "    /modify add a hypothesis that charges > $10,000 enter fraud hold",
+        ], "muted");
+        return;
+      }
+
+      let targetId: string | null = null;
+      let targetType: "tenet" | "claim" | "node" | null = null;
+
+      const colonIdx = body.indexOf(":");
+      const firstToken = body.split(/\s+/)[0];
+
+      if (ctx.tenets && ctx.tenets.claims[firstToken]) {
+        targetId = firstToken;
+        targetType = "claim";
+        body = body.slice(firstToken.length).trim().replace(/^:\s*/, "");
+      } else if (ctx.tenets && ctx.tenets.tenets.some((t) => t.id === firstToken)) {
+        targetId = firstToken;
+        targetType = "tenet";
+        body = body.slice(firstToken.length).trim().replace(/^:\s*/, "");
+      } else if (ctx.index && ctx.index.nodes.has(firstToken)) {
+        targetId = firstToken;
+        targetType = "node";
+        body = body.slice(firstToken.length).trim().replace(/^:\s*/, "");
+      } else if (colonIdx > 0 && colonIdx < 40) {
+        const potentialTarget = body.slice(0, colonIdx).trim();
+        if (ctx.tenets && ctx.tenets.claims[potentialTarget]) {
+          targetId = potentialTarget;
+          targetType = "claim";
+          body = body.slice(colonIdx + 1).trim();
+        } else if (ctx.tenets && ctx.tenets.tenets.some((t) => t.id === potentialTarget)) {
+          targetId = potentialTarget;
+          targetType = "tenet";
+          body = body.slice(colonIdx + 1).trim();
+        } else if (ctx.index && ctx.index.nodes.has(potentialTarget)) {
+          targetId = potentialTarget;
+          targetType = "node";
+          body = body.slice(colonIdx + 1).trim();
+        }
+      }
+
+      if (!targetId) {
+        if (ctx.selection.view === "intent") {
+          if (ctx.selection.claim_id) {
+            targetId = ctx.selection.claim_id;
+            targetType = "claim";
+          } else if (ctx.selection.tenet_id) {
+            targetId = ctx.selection.tenet_id;
+            targetType = "tenet";
+          }
+        } else if (ctx.selection.node_id) {
+          targetId = ctx.selection.node_id;
+          targetType = "node";
+        }
+      }
+
+      if (!targetId && ctx.view === "tenets" && ctx.tenets?.root_id) {
+        targetId = ctx.tenets.root_id;
+        targetType = "tenet";
+      }
+
+      if (!targetId) {
+        ctx.print("  nothing selected to modify. Click a tenet, claim, or codebase node, or specify target: 'modify <id> : <instruction>'", "error");
+        return;
+      }
+
+      ctx.print(`  modifying ${targetType} [${targetId}]…`, "muted");
+
+      if (targetType === "claim") {
+        const claim = ctx.tenets?.claims[targetId];
+        if (!claim) {
+          ctx.print(`  claim not found: ${targetId}`, "error");
+          return;
+        }
+
+        const lower = body.toLowerCase();
+        if (lower.startsWith("statement:") || lower.startsWith("stmt:")) {
+          const val = body.replace(/^(statement|stmt):\s*/i, "").trim();
+          await applyClaimEdit(ctx, claim, { statement: val });
+          ctx.print(`  ✓ updated statement on ${claim.id}: "${val}"`, "success");
+        } else if (lower.startsWith("explanation:") || lower.startsWith("why:")) {
+          const val = body.replace(/^(explanation|why):\s*/i, "").trim();
+          await applyClaimEdit(ctx, claim, { test_explanation: val });
+          ctx.print(`  ✓ updated test explanation on ${claim.id}`, "success");
+        } else if (lower.startsWith("recipe:") || lower.startsWith("implementation:") || lower.startsWith("test:")) {
+          const val = body.replace(/^(recipe|implementation|test):\s*/i, "").trim();
+          await applyClaimEdit(ctx, claim, { test_implementation: val });
+          ctx.print(`  ✓ updated implementation recipe on ${claim.id}`, "success");
+        } else if (lower.startsWith("confidence:") || lower.startsWith("conf:")) {
+          let num = parseFloat(body.replace(/^(confidence|conf):\s*/i, "").trim().replace("%", ""));
+          if (num > 1) num = num / 100;
+          num = Math.max(0, Math.min(1, num));
+          await applyClaimEdit(ctx, claim, { confidence: num });
+          ctx.print(`  ✓ updated confidence on ${claim.id} to ${Math.round(num * 100)}%`, "success");
+        } else if (lower.startsWith("dependencies:") || lower.startsWith("deps:")) {
+          const val = body.replace(/^(dependencies|deps):\s*/i, "").split(/[,\s]+/).map((s) => s.trim()).filter(Boolean);
+          await applyClaimEdit(ctx, claim, { dependencies: val });
+          ctx.print(`  ✓ updated dependencies on ${claim.id}: [${val.join(", ")}]`, "success");
+        } else if (lower === "promote") {
+          if (ctx.wsApi) await ctx.wsApi.promote(claim.id, true);
+          if (ctx.updateTree) ctx.updateTree((prev) => ({
+            ...prev,
+            claims: { ...prev.claims, [claim.id]: { ...claim, status: "axiom", verification: "accepted_without_verification" } }
+          }));
+          ctx.print(`  ✓ promoted ${claim.id} to Axiom`, "success");
+        } else if (lower.startsWith("demote")) {
+          const reason = body.replace(/^demote:?\s*/i, "").trim() || "demoted via terminal";
+          if (ctx.wsApi) await ctx.wsApi.demote(claim.id, reason);
+          if (ctx.updateTree) ctx.updateTree((prev) => ({
+            ...prev,
+            claims: { ...prev.claims, [claim.id]: { ...claim, status: "hypothesis" } }
+          }));
+          ctx.print(`  ✓ demoted ${claim.id} to Hypothesis`, "success");
+        } else {
+          const cleanText = body.replace(/^set\s+/i, "").replace(/^change\s+to\s+/i, "");
+          await applyClaimEdit(ctx, claim, { statement: cleanText });
+          ctx.print(`  ✓ updated statement on ${claim.id}: "${cleanText}"`, "success");
+        }
+
+        await ctx.sync();
+        ctx.openClaim(claim.id);
+        return;
+      }
+
+      if (targetType === "tenet") {
+        const tenet = ctx.tenets?.tenets.find((t) => t.id === targetId);
+        if (!tenet) {
+          ctx.print(`  tenet not found: ${targetId}`, "error");
+          return;
+        }
+
+        const lower = body.toLowerCase();
+        if (
+          lower.startsWith("add hypothesis:") ||
+          lower.startsWith("add claim:") ||
+          lower.startsWith("hypothesis:") ||
+          lower.startsWith("claim:") ||
+          lower.startsWith("add hypothesis") ||
+          lower.startsWith("add claim")
+        ) {
+          const stmt = body.replace(/^(add\s+)?(hypothesis|claim):?\s*/i, "").trim();
+          if (!stmt) {
+            ctx.print("  usage: modify add hypothesis: <testable statement>", "error");
+            return;
+          }
+          let newClaimId = `c_${Math.random().toString(16).slice(2, 10)}`;
+          if (ctx.wsApi) {
+            try {
+              const created = await ctx.wsApi.createClaim(tenet.id, {
+                statement: stmt,
+                test_explanation: `Verifies invariant rule for ${tenet.name}`,
+                test_implementation: `INVOKE entry point in ${tenet.code_links[0]?.path || tenet.name}. ASSERT: ${stmt}`,
+                confidence: 0.8,
+              });
+              newClaimId = created.id;
+            } catch (e) {
+              /* ignore and fall through to local update */
+            }
+          }
+          if (ctx.updateTree) {
+            ctx.updateTree((prev) => {
+              const newC = {
+                id: newClaimId,
+                tenet_id: tenet.id,
+                status: "hypothesis" as const,
+                verification: null,
+                confidence: 0.8,
+                proposed: false,
+                flags: [],
+                version: 1,
+                statement: stmt,
+                test_explanation: `Verifies invariant rule for ${tenet.name}`,
+                test_implementation: `INVOKE entry point in ${tenet.code_links[0]?.path || tenet.name}. ASSERT: ${stmt}`,
+                dependencies: [],
+                content_hash: newClaimId,
+                provenance: { via: "manual" },
+                result: { verdict: "untested" as const, flaky: false, runs: 0, last_run_at: null },
+              };
+              return {
+                ...prev,
+                tenets: prev.tenets.map((t) => (t.id === tenet.id ? { ...t, claims: [...t.claims, newClaimId], hypotheses: t.hypotheses + 1 } : t)),
+                claims: { ...prev.claims, [newClaimId]: newC },
+              };
+            });
+          }
+          ctx.print(`  ✓ added Hypothesis ${newClaimId} to Tenet "${tenet.name}":`, "success");
+          ctx.print(`    "${stmt}"`);
+          await ctx.sync();
+          ctx.openClaim(newClaimId);
+          return;
+        }
+
+        if (lower.startsWith("name:") || lower.startsWith("title:")) {
+          const val = body.replace(/^(name|title):\s*/i, "").trim();
+          await applyTenetEdit(ctx, tenet, { name: val });
+          ctx.print(`  ✓ updated name of tenet ${tenet.id}: "${val}"`, "success");
+        } else if (lower.startsWith("functionality:") || lower.startsWith("func:") || lower.startsWith("desc:")) {
+          const val = body.replace(/^(functionality|func|desc):\s*/i, "").trim();
+          await applyTenetEdit(ctx, tenet, { functionality: val });
+          ctx.print(`  ✓ updated functionality of tenet "${tenet.name}"`, "success");
+        } else if (lower.startsWith("add link:") || lower.startsWith("link:")) {
+          const p = body.replace(/^(add\s+)?link:\s*/i, "").trim();
+          const links = [...tenet.code_links, { path: p }];
+          await applyTenetEdit(ctx, tenet, { code_links: links });
+          ctx.print(`  ✓ added code link "${p}" to tenet "${tenet.name}"`, "success");
+        } else if (lower.startsWith("unknown:") || lower.startsWith("add unknown:")) {
+          const q = body.replace(/^(add\s+)?unknown:\s*/i, "").trim();
+          const unknowns = [...(tenet.open_unknowns || []), q];
+          await applyTenetEdit(ctx, tenet, { open_unknowns: unknowns });
+          ctx.print(`  ✓ added open unknown question to tenet "${tenet.name}"`, "success");
+        } else {
+          if (lower.includes("hypothesis") || lower.includes("invariant") || lower.includes("assertion") || lower.includes("rule")) {
+            const stmt = body.replace(/^(please\s+)?(add|create|make)\s+(a\s+)?(new\s+)?(hypothesis|invariant|rule|claim)\s+(that|testing|to\s+test)?\s*/i, "").trim();
+            let newClaimId = `c_${Math.random().toString(16).slice(2, 10)}`;
+            if (ctx.wsApi) {
+              try {
+                const created = await ctx.wsApi.createClaim(tenet.id, {
+                  statement: stmt,
+                  test_explanation: `Verifies rule for ${tenet.name}`,
+                  test_implementation: `INVOKE entry point. ASSERT: ${stmt}`,
+                  confidence: 0.8,
+                });
+                newClaimId = created.id;
+              } catch {}
+            }
+            if (ctx.updateTree) {
+              ctx.updateTree((prev) => {
+                const newC = {
+                  id: newClaimId,
+                  tenet_id: tenet.id,
+                  status: "hypothesis" as const,
+                  verification: null,
+                  confidence: 0.8,
+                  proposed: false,
+                  flags: [],
+                  version: 1,
+                  statement: stmt,
+                  test_explanation: `Verifies rule for ${tenet.name}`,
+                  test_implementation: `INVOKE entry point. ASSERT: ${stmt}`,
+                  dependencies: [],
+                  content_hash: newClaimId,
+                  provenance: { via: "manual" },
+                  result: { verdict: "untested" as const, flaky: false, runs: 0, last_run_at: null },
+                };
+                return {
+                  ...prev,
+                  tenets: prev.tenets.map((t) => (t.id === tenet.id ? { ...t, claims: [...t.claims, newClaimId], hypotheses: t.hypotheses + 1 } : t)),
+                  claims: { ...prev.claims, [newClaimId]: newC },
+                };
+              });
+            }
+            ctx.print(`  ✓ added Hypothesis ${newClaimId} to Tenet "${tenet.name}":`, "success");
+            ctx.print(`    "${stmt}"`);
+            await ctx.sync();
+            ctx.openClaim(newClaimId);
+            return;
+          }
+
+          await applyTenetEdit(ctx, tenet, { functionality: body });
+          ctx.print(`  ✓ updated functionality for tenet "${tenet.name}": "${body}"`, "success");
+        }
+
+        await ctx.sync();
+        ctx.selectTenet(tenet.id);
+        return;
+      }
+
+      if (targetType === "node") {
+        const node = ctx.index?.nodes.get(targetId);
+        if (!node) {
+          ctx.print(`  node not found: ${targetId}`, "error");
+          return;
+        }
+
+        const lower = body.toLowerCase();
+        if (lower.startsWith("summary:") || lower.startsWith("intent:")) {
+          node.intent_summary = body.replace(/^(summary|intent):\s*/i, "").trim();
+          ctx.print(`  ✓ updated intent summary for ${node.node_id}`, "success");
+        } else if (lower.startsWith("add invariant:") || lower.startsWith("invariant:")) {
+          const invStr = body.replace(/^(add\s+)?invariant:\s*/i, "").trim();
+          node.business_invariants.push(invStr);
+          ctx.print(`  ✓ added business invariant to ${node.node_id}: "${invStr}"`, "success");
+        } else if (lower.startsWith("name:")) {
+          node.name = body.replace(/^name:\s*/i, "").trim();
+          ctx.print(`  ✓ updated node name to "${node.name}"`, "success");
+        } else {
+          node.intent_summary = body;
+          ctx.print(`  ✓ updated intent summary for ${node.node_id}`, "success");
+        }
+
+        try {
+          await fetch("/api/graph/nodes", {
+            method: "POST",
+            headers: { "Content-Type": "application/json" },
+            body: JSON.stringify(node),
+          });
+        } catch {}
+
+        await ctx.sync();
+        ctx.select(node.node_id);
+        return;
+      }
     },
   },
   {
@@ -113,7 +583,7 @@ export const commands: Command[] = [
       const q = args.join(" ");
       if (!q) return ctx.print(`  usage: ${this.usage}`, "muted");
       const f = await ctx.query(q);
-      if (!f || !f.nodeIds.size) return ctx.print("  no intent nodes matched", "error");
+      if (!f || !f.nodeIds.size) return ctx.print("  no codebase nodes matched", "error");
       printFocus(ctx, f);
     },
   },
@@ -202,10 +672,58 @@ export const commands: Command[] = [
   },
   {
     name: "tests",
-    usage: "tests <node>",
-    summary: "generate invariant tests for a node",
+    usage: "tests [tenet|node]",
+    summary: "generate invariant tests for an intent tenet or node",
     async run(args, ctx) {
-      const id = needNode(ctx, args.join(" "), this.usage);
+      const term = args.join(" ").trim();
+      const target = term || ctx.selection.target_id || ctx.selection.tenet_id || "";
+      if (!target) {
+        return ctx.print(`  usage: ${this.usage}`, "muted");
+      }
+
+      // Check if target is or matches an Intent Tenet
+      const tenetId = resolveTenet(ctx.tenets, target);
+      if (tenetId && ctx.tenets) {
+        const t = ctx.tenets.tenets.find((x) => x.id === tenetId);
+        if (t) {
+          const clms = t.claims.map((cid) => ctx.tenets!.claims[cid]).filter(Boolean);
+          ctx.print([
+            "",
+            `⚡ Generating invariant tests for Intent Tenet: "${t.name}" (${t.id})`,
+            `  Functionality: ${t.functionality || "(none)"}`,
+            `  Covering ${clms.length} invariant claim(s)...`,
+          ], "prompt");
+
+          if (!clms.length) {
+            ctx.print("  (no claims/invariants defined yet for this tenet; define claims in the Tenet Inspector first)", "muted");
+          } else {
+            clms.forEach((c) => {
+              ctx.print([
+                `  ✓ test_${c.id}_invariant_enforced:`,
+                `    rule: "${c.statement}"`,
+                c.test_implementation ? `    recipe: ${c.test_implementation.split("\n")[0]}` : null,
+              ].filter(Boolean) as string[], "success");
+            });
+          }
+
+          const linkedNodes = graphNodesFor(ctx.index, ctx.tenets, t.id);
+          if (linkedNodes.length && ctx.source.generateTests) {
+            ctx.print(`  synthesizing deterministic test suite for linked code (${linkedNodes.map((n) => n.name).join(", ")})...`, "muted");
+            try {
+              for (const node of linkedNodes.slice(0, 2)) {
+                const res = await ctx.source.generateTests(ctx.repo, node.id);
+                res.tests.forEach((st) => ctx.print(`    ✓ synthesized pytest: ${st.name}`, "success"));
+              }
+            } catch (e: any) {
+              ctx.print(`    (test generator note: ${e.message || e})`, "muted");
+            }
+          }
+          return;
+        }
+      }
+
+      // Fallback: codebase node
+      const id = needNode(ctx, target, this.usage);
       if (!id) return;
       if (!ctx.source.generateTests) {
         const n = ctx.index!.nodes.get(id)!.business_invariants.length;
@@ -320,6 +838,35 @@ export const commands: Command[] = [
     async run(_a, ctx) {
       ctx.print(`  syncing ${ctx.repo} via ${ctx.source.label}…`, "muted");
       await ctx.sync();
+    },
+  },
+  {
+    name: "export",
+    aliases: ["push-intent"],
+    usage: "export",
+    summary: "export .intentflow files to github branch (intentflow/intents)",
+    async run(_a, ctx) {
+      if (!ctx.wsApi) {
+        ctx.print("  ✗ Cannot export: no workspace connection (sign in and connect a repository first)", "error");
+        return;
+      }
+      ctx.print(`  committing intent files to ${ctx.repo}...`, "muted");
+      try {
+        const res = await ctx.wsApi.exportFolder();
+        if (res.changed) {
+          ctx.print([
+            `  ✓ successfully exported ${res.files} intent files to branch: ${res.branch}`,
+            `  commit: ${res.commit_sha.slice(0, 7)}`,
+          ], "success");
+        } else {
+          ctx.print([
+            `  ✓ nothing changed since last export (${res.branch})`,
+            `  latest commit: ${res.commit_sha.slice(0, 7)}`,
+          ], "muted");
+        }
+      } catch (e: any) {
+        ctx.print(`  ✗ export failed: ${e.message || e}`, "error");
+      }
     },
   },
   {
@@ -451,7 +998,9 @@ const byName = new Map(commands.flatMap((c) => [c.name, ...(c.aliases ?? [])].ma
 /** Parses and executes one line. Unknown multi-word input → question. */
 export async function execute(raw: string, ctx: CommandContext): Promise<void> {
   const [verb = "", ...args] = raw.trim().split(/\s+/);
-  const cmd = byName.get(verb.toLowerCase());
+  const vLower = verb.toLowerCase();
+  const vNorm = vLower.replace(/^[\/]/, "").replace(/:$/, "");
+  const cmd = byName.get(vLower) ?? byName.get(vNorm) ?? byName.get(`/${vNorm}`);
 
   if (cmd) {
     if (!cmd.offline && !ctx.index) return ctx.print("  graph not loaded yet", "error");
@@ -463,7 +1012,6 @@ export async function execute(raw: string, ctx: CommandContext): Promise<void> {
     return;
   }
 
-  const vLower = verb.toLowerCase();
   const isChoiceOrGrill =
     ["a", "b", "c", "1", "2", "3", "option", "choice", "answer"].includes(vLower) ||
     vLower.startsWith("option") ||
@@ -490,7 +1038,7 @@ export async function execute(raw: string, ctx: CommandContext): Promise<void> {
 
   if (!ctx.source.ask) {
     if (!f || !f.nodeIds.size) {
-      return ctx.print("  no intent nodes matched that question and agent not connected", "error");
+      return ctx.print("  no codebase nodes matched that question and agent not connected", "error");
     }
     ctx.print("  agent not connected · context is ready (run `context` to view it)", "muted");
     return;

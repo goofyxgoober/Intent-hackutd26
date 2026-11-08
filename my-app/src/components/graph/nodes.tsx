@@ -24,7 +24,8 @@ export const IntentNodeCard = memo(function IntentNodeCard({ data, selected }: N
   return (
     <div
       className={`node-card ${kind} ${selected ? "selected" : ""} ${dim ? "dim" : ""} ${hit ? "hit" : ""}`}
-      title={node.name}
+      title={node.name ? `${node.name} · codebase node` : "codebase node"}
+      aria-label="codebase node"
     >
       <Handle type="target" position={Position.Top} isConnectable={false} />
       <span className="node-head">

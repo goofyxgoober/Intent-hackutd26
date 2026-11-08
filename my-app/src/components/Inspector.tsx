@@ -11,13 +11,14 @@ interface Props {
   nodeId: string;
   focus: Focus | null;
   onSelect(id: string | null): void;
-  onGenerateTests(id: string): void;
+  onGenerateTests?(id: string): void;
   /** Tenets whose code links cover this node's file. */
   tenets?: { id: string; name: string; rollup: string }[];
   onOpenTenet?(id: string): void;
+  onUpdateNode?(nodeId: string, updated: any): void;
 }
 
-type Tab = "intent" | "links" | "context";
+type Tab = "intent" | "links" | "context" | "edit";
 
 /** A flow row: a name and its type/meaning. */
 function Flow({ label, map }: { label: string; map: Record<string, string> }) {
@@ -41,11 +42,30 @@ function Flow({ label, map }: { label: string; map: Record<string, string> }) {
   );
 }
 
-export function Inspector({ index, nodeId, focus, onSelect, onGenerateTests, tenets, onOpenTenet }: Props) {
+export function Inspector({ index, nodeId, focus, onSelect, onGenerateTests, tenets, onOpenTenet, onUpdateNode }: Props) {
   const [tab, setTab] = useState<Tab>("intent");
   const [copied, setCopied] = useState(false);
   const node = index.nodes.get(nodeId);
+
+  const [editName, setEditName] = useState(node?.name ?? "");
+  const [editSummary, setEditSummary] = useState(node?.intent_summary ?? "");
+  const [editInvariants, setEditInvariants] = useState<string[]>(node?.business_invariants || []);
+  const [newInv, setNewInv] = useState("");
+
   if (!node) return null;
+
+  function saveNode() {
+    const updated = {
+      name: editName,
+      intent_summary: editSummary,
+      business_invariants: editInvariants,
+    };
+    node!.name = editName;
+    node!.intent_summary = editSummary;
+    node!.business_invariants = editInvariants;
+    onUpdateNode?.(nodeId, updated);
+    setTab("intent");
+  }
 
   const ids = [...index.nodes.keys()];
   const at = ids.indexOf(nodeId);
@@ -84,10 +104,10 @@ export function Inspector({ index, nodeId, focus, onSelect, onGenerateTests, ten
 
   return (
     <Panel
-      label="Intent node inspector"
+      label="Codebase node inspector"
       eyebrow={
         <>
-          <i className="pn-dot" /> intent node
+          <i className="pn-dot" /> codebase node
         </>
       }
       title={node.name}
@@ -96,17 +116,12 @@ export function Inspector({ index, nodeId, focus, onSelect, onGenerateTests, ten
         { id: "intent", label: "Intent", count: node.business_invariants.length },
         { id: "links", label: "Links", count: linkCount },
         { id: "context", label: "Context" },
+        { id: "edit", label: "✎ Edit" },
       ]}
       tab={tab}
       onTab={(t) => setTab(t as Tab)}
       onClose={() => onSelect(null)}
       step={{ onPrev: () => go(-1), onNext: () => go(1), position: `${at + 1}/${ids.length}` }}
-      footer={
-        <button className="pn-cta" onClick={() => onGenerateTests(nodeId)}>
-          <span>Generate invariant tests</span>
-          <i aria-hidden>→</i>
-        </button>
-      }
     >
       {tab === "intent" ? (
         <>
@@ -175,27 +190,99 @@ export function Inspector({ index, nodeId, focus, onSelect, onGenerateTests, ten
         </>
       ) : null}
 
-      {tab === "context" ? (
-        focus ? (
-          <Block title="Retrieved context">
-            <div className="pn-gauge">
-              <div>
-                <b>{focus.nodeIds.size}</b>
-                <small>nodes pulled in</small>
-              </div>
-              <div>
-                <b>~{focus.tokens}</b>
-                <small>tokens</small>
-              </div>
+      {tab === "edit" ? (
+        <div className="pn-edit-node" style={{ display: "flex", flexDirection: "column", gap: 12 }}>
+          <div>
+            <label style={{ fontSize: 11, textTransform: "uppercase", color: "var(--text-dim)", display: "block", marginBottom: 4 }}>
+              Node Name
+            </label>
+            <input
+              type="text"
+              style={{ width: "100%", padding: "6px 8px", background: "rgba(0,0,0,0.2)", border: "1px solid var(--border)", borderRadius: 4, color: "inherit" }}
+              value={editName}
+              onChange={(e) => setEditName(e.target.value)}
+            />
+          </div>
+
+          <div>
+            <label style={{ fontSize: 11, textTransform: "uppercase", color: "var(--text-dim)", display: "block", marginBottom: 4 }}>
+              Intent Summary
+            </label>
+            <textarea
+              rows={4}
+              style={{ width: "100%", padding: "6px 8px", background: "rgba(0,0,0,0.2)", border: "1px solid var(--border)", borderRadius: 4, color: "inherit" }}
+              value={editSummary}
+              onChange={(e) => setEditSummary(e.target.value)}
+            />
+          </div>
+
+          <div>
+            <label style={{ fontSize: 11, textTransform: "uppercase", color: "var(--text-dim)", display: "block", marginBottom: 4 }}>
+              Business Invariants ({editInvariants.length})
+            </label>
+            <div style={{ display: "flex", flexDirection: "column", gap: 6, marginBottom: 8 }}>
+              {editInvariants.map((invItem, idx) => (
+                <div key={idx} style={{ display: "flex", alignItems: "center", gap: 6 }}>
+                  <input
+                    type="text"
+                    style={{ flex: 1, padding: "4px 8px", background: "rgba(0,0,0,0.2)", border: "1px solid var(--border)", borderRadius: 4, color: "inherit", fontSize: 12 }}
+                    value={invItem}
+                    onChange={(e) => {
+                      const next = [...editInvariants];
+                      next[idx] = e.target.value;
+                      setEditInvariants(next);
+                    }}
+                  />
+                  <button
+                    type="button"
+                    style={{ background: "none", border: "none", color: "var(--text-dim)", cursor: "pointer", fontSize: 16 }}
+                    onClick={() => setEditInvariants(editInvariants.filter((_, i) => i !== idx))}
+                    title="Remove invariant"
+                  >
+                    ×
+                  </button>
+                </div>
+              ))}
             </div>
-            <p className="pn-note">The slice of the graph an agent gets when it works on this node.</p>
-            <button className="pn-ghost" onClick={() => void copyContext()}>
-              {copied ? "Copied ✓" : "Copy context"}
+            <div style={{ display: "flex", gap: 6 }}>
+              <input
+                type="text"
+                placeholder="Add business invariant..."
+                style={{ flex: 1, padding: "4px 8px", background: "rgba(0,0,0,0.2)", border: "1px solid var(--border)", borderRadius: 4, color: "inherit", fontSize: 12 }}
+                value={newInv}
+                onChange={(e) => setNewInv(e.target.value)}
+                onKeyDown={(e) => {
+                  if (e.key === "Enter" && newInv.trim()) {
+                    e.preventDefault();
+                    setEditInvariants([...editInvariants, newInv.trim()]);
+                    setNewInv("");
+                  }
+                }}
+              />
+              <button
+                type="button"
+                className="pn-ghost"
+                onClick={() => {
+                  if (newInv.trim()) {
+                    setEditInvariants([...editInvariants, newInv.trim()]);
+                    setNewInv("");
+                  }
+                }}
+              >
+                Add
+              </button>
+            </div>
+          </div>
+
+          <div style={{ display: "flex", gap: 8, marginTop: 12, paddingTop: 12, borderTop: "1px solid var(--border)" }}>
+            <button className="pn-ghost go" style={{ flex: 1, fontWeight: "bold" }} onClick={() => saveNode()}>
+              Save Node
             </button>
-          </Block>
-        ) : (
-          <p className="pn-empty">No context retrieved for this node yet.</p>
-        )
+            <button className="pn-ghost" onClick={() => setTab("intent")}>
+              Cancel
+            </button>
+          </div>
+        </div>
       ) : null}
     </Panel>
   );

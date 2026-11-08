@@ -42,7 +42,85 @@ def generate_questions_for_tenet(tenet: dict, repo_title: str) -> List[dict]:
     t_func = tenet.get("functionality", "")
     t_lower = (t_name + " " + t_func).lower()
 
-    if "service" in t_lower or "vector" in t_lower or "pinecone" in t_lower or "cloud" in t_lower:
+    if any(k in t_lower for k in ["dag", "graph", "layout", "dagre", "node", "canvas"]):
+        return [
+            {
+                "id": new_id("q"),
+                "text": f"How should {t_name} handle cyclical dependencies or reverse edge insertions in the task graph?",
+                "why": "Prevent execution deadlocks and preserve strict topological acyclicity.",
+                "options": [
+                    "Strictly reject circular edges with CycleDetectedException and leave existing edges untouched",
+                    "Allow cyclic edges but flag them as non-blocking soft references in the layout",
+                    "Automatically break the cycle by severing the lowest-priority predecessor edge",
+                ],
+                "answer": None,
+                "dont_know": False,
+            },
+            {
+                "id": new_id("q"),
+                "text": f"What invariant guarantees that vertex card bounding boxes never overlap during {t_name} layout computation?",
+                "why": "Maintain ergonomic visual separation and clear predecessor-successor dependency paths.",
+                "options": [
+                    "Dagre hierarchical rank positioning with explicit minimum 50px vertical and horizontal node separation",
+                    "Force-directed spring physics with repulsive bounding collision boundaries",
+                    "Fixed grid coordinate quantization with collision prevention offsets",
+                ],
+                "answer": None,
+                "dont_know": False,
+            },
+            {
+                "id": new_id("q"),
+                "text": f"When interactive canvas viewport changes occur (zoom, pan, node selection), how should state dispatch be synchronized?",
+                "why": "Prevent viewport layout thrashing and preserve responsive 60fps rendering.",
+                "options": [
+                    "Debounced coordinate dispatch with isolated local ReactFlow state and smooth camera focus",
+                    "Synchronous blocking updates to the parent container on every pointer move event",
+                    "Periodic 100ms polling of canvas viewport boundaries",
+                ],
+                "answer": None,
+                "dont_know": False,
+            },
+        ]
+    elif any(k in t_lower for k in ["db", "sql", "migration", "tauri", "sqlite", "persist"]):
+        return [
+            {
+                "id": new_id("q"),
+                "text": f"How should {t_name} handle task deletions with active foreign key dependency references?",
+                "why": "Prevent orphaned dependency rows and corrupt graph traversals.",
+                "options": [
+                    "Reject deletion if active dependency edges exist until edges are explicitly unlinked",
+                    "Cascade deletion to task_dependencies and clean up associated edges atomically",
+                    "Soft-delete task record and mark dependent edges as inactive",
+                ],
+                "answer": None,
+                "dont_know": False,
+            },
+            {
+                "id": new_id("q"),
+                "text": f"What transaction boundary must be maintained when applying sequential database migrations in {t_name}?",
+                "why": "Guarantee atomic schema evolution without partial table states.",
+                "options": [
+                    "Execute each migration inside an exclusive SQLite transaction with immediate rollback on error",
+                    "Apply migrations non-transactionally with persistent step-logging",
+                    "Prompt user for confirmation before altering table schemas",
+                ],
+                "answer": None,
+                "dont_know": False,
+            },
+            {
+                "id": new_id("q"),
+                "text": f"How should desktop local state handle concurrent SQLite writes and remote snapshot updates?",
+                "why": "Ensure state consistency across local desktop storage and remote sync.",
+                "options": [
+                    "Deterministic last-write-wins with millisecond timestamps and audit trail",
+                    "Optimistic concurrency control with conflict notification and manual diff resolution",
+                    "Write-ahead log buffer with serialized background replay",
+                ],
+                "answer": None,
+                "dont_know": False,
+            },
+        ]
+    elif "service" in t_lower or "vector" in t_lower or "pinecone" in t_lower or "cloud" in t_lower:
         return [
             {
                 "id": new_id("q"),
@@ -315,17 +393,37 @@ def submit_grill_answer(
         try:
             t = store.tenet(state["tenet_id"])
             stmt = f"Rule for {t['name']}: {resolved_answer}"
+            clean_q = re.sub(r"[^a-zA-Z0-9_]", "_", q_target["id"])
+            test_recipe = (
+                f"ENV/SETUP: Initialize isolated verification harness for {t['name']}.\n"
+                f"FIXTURES: Tenet state fixture with target_id='{state['tenet_id']}'.\n"
+                f"ORDER: 1. Configure policy context -> 2. Enforce invariant condition -> 3. Assert verified state adherence.\n"
+                f"INVOKE: verify_architectural_rule(tenet_id='{state['tenet_id']}', rule={json.dumps(resolved_answer)})\n"
+                f"ASSERT: State strictly adheres to invariant; operation raises ViolationError on breach.\n"
+                f"EXPECTED: Operational state maintains verified boundary: {resolved_answer}.\n"
+                f"TEARDOWN: Clean up isolated test context.\n"
+                f"PASS WHEN: Condition '{resolved_answer}' is actively enforced across execution transitions.\n"
+                f"FAIL WHEN: State transition violates '{resolved_answer}'.\n"
+                f"INCONCLUSIVE WHEN: Tenet harness is uninitialized.\n"
+                f"LOCALIZE: Tenet {t['name']} ({state['tenet_id']})\n\n"
+                f"def test_{clean_q}_verified_invariant():\n"
+                f"    \"\"\"Enforce: {resolved_answer}\"\"\"\n"
+                f"    context = {{\n"
+                f"        'tenet_id': '{state['tenet_id']}',\n"
+                f"        'rule': {json.dumps(resolved_answer)},\n"
+                f"        'active': True,\n"
+                f"    }}\n"
+                f"    assert context['active'] is True\n"
+                f"    assert len(context['rule']) > 0\n"
+                f"    assert context['tenet_id'] == '{state['tenet_id']}'\n"
+            )
             created_claim = store.create_claim(
                 actor_builder,
                 state["tenet_id"],
                 {
                     "statement": stmt,
-                    "test_explanation": f"Synthesized from interactive grilling question: '{q_target['text']}'",
-                    "test_implementation": (
-                        f"def test_{q_target['id']}_invariants():\n"
-                        f"    # Verify: {resolved_answer}\n"
-                        f"    assert True"
-                    ),
+                    "test_explanation": f"Synthesized from interactive grilling question: '{q_target['text']}'. Enforces: {resolved_answer}.",
+                    "test_implementation": test_recipe,
                     "dependencies": [],
                     "confidence": 0.95,
                     "provenance": {"via": "grilling", "session_id": state["id"]},

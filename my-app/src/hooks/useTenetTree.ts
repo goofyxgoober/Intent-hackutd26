@@ -19,6 +19,8 @@ export interface TenetTreeState {
   live: boolean;
   wsApi: Api | null;
   reload(): Promise<void>;
+  /** Update the in-memory tree immediately (for responsive UI/demo). */
+  updateTree(updater: (prev: TreeView) => TreeView): void;
   /** Last event message from the backend, for the terminal. */
   notice: string | null;
 }
@@ -117,5 +119,9 @@ export function useTenetTree(source: GraphSource, repo: string, enabled: boolean
     void reload();
   });
 
-  return { tree, status, error, offline, live, wsApi, reload, notice };
+  const updateTree = useCallback((updater: (prev: TreeView) => TreeView) => {
+    setTree((prev) => (prev ? updater(prev) : prev));
+  }, []);
+
+  return { tree, status, error, offline, live, wsApi, reload, updateTree, notice };
 }
