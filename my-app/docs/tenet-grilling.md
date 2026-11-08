@@ -29,6 +29,11 @@ feature     └── Web                     level 1
 - **No fake tests.** Grilling writes `test_implementation: ""`; the Test Author writes test recipes.
 - **Code links live on leaves only.** When a Tenet is split, its files move to its children, and
   every file stays covered by exactly one leaf.
+- **Composition, not duplication.** When a Tenet's code imports code owned under one of its peers,
+  it gets a reference to that Tenet instead of repeating its rules (`add_composition_references`).
+- **New code keeps getting covered.** Files added in later commits join the leaf that owns their
+  folder; a new top-level folder becomes a new feature with a starting Hypothesis
+  (`place_new_files`). This runs on every sync and pipeline run, and never rebuilds a grilled tree.
 
 ## Running it
 
@@ -98,8 +103,17 @@ Everything is in `backend/app/grill.py` unless noted.
    `_structural_split` splits at the first folder where the files diverge, keeps config and docs
    files with the code, and names generic folders (`src`, `lib`, ...) after the parent.
    `_apply_children` moves the code links to the children and gives each one a starting Hypothesis.
-6. **Next Tenet.** The children are queued, and the next queued Tenet is entered. When the queue
+6. **References.** After a split, `add_composition_references` walks the import edges: if code
+   under a Tenet imports a file owned under one of its peers, the Tenet references the part of
+   that peer that owns the file (REFERENCE_SCOPE=peer_children). Pairs that would make a cycle are
+   skipped. The `grill.tenet_done` event lists the references added.
+7. **Next Tenet.** The children are queued, and the next queued Tenet is entered. When the queue
    is empty the session is `done`.
+8. **Later commits.** `place_new_files` runs from `generate_requirements_and_tenets` (when a tree
+   already exists) and from incremental syncs (`sync.py`, for added files). Each file joins the
+   leaf whose files share the longest folder path; otherwise its top folder becomes a new feature.
+   The sync batch lists them under `placed_files` and `created_tenets`. A hand-made tree with no
+   code links at all is left alone.
 
 Starting Hypotheses come from `default_hypothesis`, in this order: a rule the code enforces (from
 annotations), the code's responsibilities, the Tenet's functionality, then its file paths. A Tenet
@@ -121,7 +135,8 @@ NVIDIA_API_KEY= python3 -m pytest -q backend/tests/test_grill.py
 
 `backend/tests/test_grill.py` covers level ordering, splits, links on leaves, starting
 Hypotheses, verbatim answers, corrections, one-word replies, "don't know", refused splits, max
-depth, the LLM path (scripted), old session files and resuming after a pipeline run. Tests replace
+depth, the LLM path (scripted), old session files, resuming after a pipeline run, composition
+references from imports and files added after grilling. Tests replace
 `grill._llm_json`, so they run offline.
 
 ## Extending it

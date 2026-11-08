@@ -191,7 +191,7 @@ def repo_grill_start(body: Optional[GrillStartRequest] = None, repo: ConnectedRe
     """Start or reset interactive tenet grilling session."""
     from . import grill
     tid = body.tenet_id if body else None
-    return grill.start_grill_session(repo.id, tenet_id=tid)
+    return grill.start_grill_session(repo.id, tenet_id=tid, full_name=repo.full_name)
 
 
 

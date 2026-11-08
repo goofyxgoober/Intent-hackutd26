@@ -320,6 +320,10 @@ async def _process(workspace_id: int, source: str, token: Optional[str], head: O
                         annot = pipeline.generate_annotations_for_file(p, content)
                         store.put_annotation(actor_engine, p, annot)
 
+    # Files added since the tree was built join the Tenet that owns their folder (or a new feature).
+    from .grill import place_new_files
+    placed = place_new_files(store, [f["path"] for f in cmp["files"] if f.get("status") in ("added", "renamed")])
+
     changed = [f["path"] for f in cmp["files"]] + list(renames)
     deleted = [f["path"] for f in cmp["files"] if f["status"] == "removed"]
     pure_rename = bool(cmp["files"]) and all(
@@ -334,6 +338,8 @@ async def _process(workspace_id: int, source: str, token: Optional[str], head: O
         "renames": renames,
         "skip_reason": "pure_rename" if pure_rename else None,
         "truncated": cmp["truncated"],
+        "placed_files": placed["placed"],
+        "created_tenets": placed["created"],
         **_affected(store, changed, deleted),
     }
     status = "skipped" if pure_rename else "awaiting_review"

@@ -422,10 +422,14 @@ def generate_requirements_and_tenets(store: IntentStore, snapshot: dict, full_na
 
     tenets = store.tenets()
     if tenets:
+        # The tree already exists (and may be grilled): only link files no Tenet covers yet.
+        from .grill import place_new_files
         root_id = next((t["id"] for t in tenets.values() if t["parent_id"] is None), None)
+        placed = place_new_files(store, [f["path"] for f in snapshot.get("files", []) if f.get("path")])
         return {
             "root_id": root_id,
-            "created_tenets": [],
+            "placed_files": placed["placed"],
+            "created_tenets": placed["created"],
             "created_claims": [],
         }
 

@@ -329,6 +329,127 @@ def ensure_hypothesis(store: IntentStore, tid: str, via: str) -> Optional[str]:
     return claim["id"]
 
 
+# ---------------------------------------------------------------- composition references
+
+
+def _own_files(tenets: Dict[str, dict], tid: str) -> set:
+    """Files in a Tenet's own subtree (not the Tenets it references)."""
+    out, stack = set(), [tid]
+    while stack:
+        t = tenets[stack.pop()]
+        if t["children"]:
+            stack.extend(c for c in t["children"] if c in tenets)
+        else:
+            out.update(l["path"] for l in t["code_links"] if l.get("path"))
+    return out
+
+
+def add_composition_references(store: IntentStore) -> List[Tuple[str, str]]:
+    """When a Tenet's code imports code owned in another branch, reference that Tenet (spec 10.2).
+
+    The target is the Tenet that owns the imported file and sits under one of this Tenet's
+    peers, so the rule is reused instead of duplicated. Idempotent: safe to run after every
+    Tenet is finalized, as the tree grows. Returns the (tenet, target) pairs added.
+    """
+    from fastapi import HTTPException
+
+    edges = (store.imports() or {}).get("edges") or []
+    if not edges:
+        return []
+    tenets = store.tenets()
+    owner = {l["path"]: t["id"] for t in tenets.values() if not t["children"] for l in t["code_links"]}
+    imports: Dict[str, set] = {}
+    for e in edges:
+        imports.setdefault(e.get("source"), set()).add(e.get("target"))
+    added: List[Tuple[str, str]] = []
+    for t in list(tenets.values()):
+        parent = tenets.get(t.get("parent_id") or "")
+        if not parent:
+            continue
+        peers = set(parent["children"]) - {t["id"]}
+        if not peers:
+            continue
+        own = _own_files(tenets, t["id"])
+        targets = set()
+        for src in own:
+            for dst in imports.get(src, ()):
+                x = owner.get(dst) if dst not in own else None
+                while x and tenets[x].get("parent_id") not in peers:  # climb to a child of a peer
+                    x = tenets[x].get("parent_id")
+                if x:
+                    targets.add(x)
+        for x in sorted(targets - set(t["references"])):
+            try:
+                store.add_reference(BUILDER, t["id"], x)
+                added.append((t["id"], x))
+            except HTTPException:
+                continue  # e.g. it would make a reference cycle; leave it out
+    return added
+
+
+# ---------------------------------------------------------------- files added after grilling
+
+
+def place_new_files(store: IntentStore, paths: Optional[List[str]] = None) -> dict:
+    """Link files no Tenet covers yet (added in later commits) so the hierarchy keeps covering the code.
+
+    Each file joins the leaf whose files share the longest folder path with it. Files with no
+    such leaf (a new top-level folder) become a new feature under the root, with a starting
+    Hypothesis. Only for trees built from the code: a tree with no links at all is left alone.
+    Returns {"placed": {tenet_id: [paths]}, "created": [tenet_ids]}.
+    """
+    tenets = store.tenets()
+    root = next((t for t in tenets.values() if not t.get("parent_id")), None)
+    if root is None:
+        return {"placed": {}, "created": []}
+    if paths is None:
+        paths = [f["path"] for f in (store.imports() or {}).get("files", []) if f.get("path")]
+    covered = {l["path"] for t in tenets.values() for l in t["code_links"]}
+    if not covered:  # a hand-made tree with no links yet: linking it is the user's call, not ours
+        return {"placed": {}, "created": []}
+    new = [p for p in OrderedDict.fromkeys(paths) if p not in covered]
+    if not new:
+        return {"placed": {}, "created": []}
+
+    leaf_dirs = [(t["id"], l["path"].split("/")[:-1]) for t in tenets.values() if not t["children"]
+                 for l in t["code_links"]]
+    placed: Dict[str, List[str]] = OrderedDict()
+    unplaced: Dict[str, List[str]] = OrderedDict()
+    for p in new:
+        pdir = p.split("/")[:-1]
+        best, best_key = None, (0, 0)
+        for tid, d in leaf_dirs:
+            common = 0
+            while common < min(len(pdir), len(d)) and pdir[common] == d[common]:
+                common += 1
+            key = (common, -abs(len(d) - len(pdir)))
+            if common and key > best_key:
+                best, best_key = tid, key
+        if best:
+            placed.setdefault(best, []).append(p)
+        elif not root["children"]:
+            placed.setdefault(root["id"], []).append(p)
+        else:
+            unplaced.setdefault(pdir[0] if pdir else "core", []).append(p)
+
+    for tid, ps in placed.items():
+        store.set_links(ENGINE, tid, store.tenet(tid)["code_links"] + [{"path": p} for p in ps])
+
+    created = []
+    names = {store.tenet(c)["name"].lower() for c in root["children"]}
+    for grp, ps in unplaced.items():
+        name = "Core" if grp.lower() in GENERIC_FOLDERS else _humanize(grp)
+        while name.lower() in names:
+            name += " (new)"
+        child = store.create_tenet(BUILDER, name, _describe(store, name, ps), root["id"], [], {"via": "sync"})
+        store.set_links(ENGINE, child["id"], [{"path": p} for p in ps])
+        ensure_hypothesis(store, child["id"], "sync")
+        names.add(name.lower())
+        created.append(child["id"])
+        placed[child["id"]] = ps
+    return {"placed": dict(placed), "created": created}
+
+
 # ---------------------------------------------------------------- questions
 
 
@@ -447,7 +568,8 @@ Return:
 - "functionality": one precise paragraph of what this Tenet does, consistent with the answers.
 - "hypotheses": at most 3 Hypotheses, each ONE independently testable assertion about this Tenet,
   with a plain-language "test_explanation" of what a test would check. Use the developer's own
-  words where they stated a rule.
+  words where they stated a rule. If a rule asserts more than one thing, split it into separate
+  Hypotheses.
 - "children": {"" if can_split else "[] (this Tenet must not be split)."}{f'''2-{MAX_CHILDREN} sub-parts, each {{"name", "functionality", "files"}}. "files" must
   only use paths from the list above, and every path should belong to exactly one part. Return []
   if this Tenet is one single behaviour that should not be split.''' if can_split else ""}
@@ -652,13 +774,15 @@ def submit_grill_answer(workspace_id: int, user_text: str, question_id: Optional
         result = finalize_tenet(workspace_id, state)
         state["created"].extend(result["children"])
         store = IntentStore(workspace_id)
+        result["references"] = add_composition_references(store) if result["children"] else []
         tenets = store.tenets()
         # Queue this Tenet's children for the next level (breadth-first = level by level).
         for child in tenets[state["tenet_id"]]["children"] if state["tenet_id"] in tenets else []:
             if IntentStore.level(tenets, child) <= state["max_depth"] and child not in state["queue"]:
                 state["queue"].append(child)
         emit(workspace_id, "grill.tenet_done", grill_id=state["id"], tenet_id=state["tenet_id"],
-             tenet_name=answered_tenet, children=result["children"], hypotheses=result["hypotheses"])
+             tenet_name=answered_tenet, children=result["children"], hypotheses=result["hypotheses"],
+             references=result["references"])
         state["queue"] = [t for t in state["queue"] if t in tenets]
         if state["queue"]:
             _enter_tenet(workspace_id, state, state["queue"].pop(0))

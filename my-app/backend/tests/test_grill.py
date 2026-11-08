@@ -242,3 +242,37 @@ def test_confirmed_draft_loses_the_draft_label(store):
     root = next(t for t in store.tenets().values() if not t["parent_id"])
     assert not root["functionality"].startswith("Draft:")
     assert "Grilling confirms" not in root["functionality"]
+
+
+def test_imports_across_branches_become_composition_references(store):
+    store.put_imports({"head": "x", "files": [{"path": p, "size": 1, "language": "x"} for p in FILES],
+                       "edges": [{"source": "src/auth/session.py", "target": "src/db/user.py"}], "external": []})
+    grill.start_grill_session(WS)
+    answer_all()
+    tenets, _ = tree(store)
+    by_name = {t["name"]: t for t in tenets.values()}
+    # Auth uses the code in Db's "User" part, so it references it instead of duplicating its rules
+    assert by_name["Auth"]["references"] == [by_name["User"]["id"]]
+    assert all(t["references"] == [] for n, t in by_name.items() if n != "Auth")
+
+
+def test_files_added_after_grilling_join_the_tree(store):
+    grill.start_grill_session(WS)
+    answer_all()
+    later = FILES + ["src/auth/refresh.py", "billing/invoice.py"]
+    res = pipeline.generate_requirements_and_tenets(store, {"files": [{"path": p} for p in later]}, "acme/legacy")
+    tenets, _ = tree(store)
+    owner = {l["path"]: t for t in tenets.values() for l in t["code_links"]}
+    # a file next to existing code joins the leaf that owns that folder
+    assert owner["src/auth/refresh.py"]["name"] in ("Session", "Token")
+    # a new top-level folder becomes a new feature under the root, starting with a Hypothesis
+    billing = owner["billing/invoice.py"]
+    assert billing["name"] == "Billing" and not tenets[billing["parent_id"]]["parent_id"]
+    assert res["created_tenets"] == [billing["id"]]
+    started_with_one_hypothesis(store)
+    for t in tenets.values():
+        if t["children"]:
+            assert t["code_links"] == []
+    # running it again changes nothing
+    again = pipeline.generate_requirements_and_tenets(store, {"files": [{"path": p} for p in later]}, "acme/legacy")
+    assert again["created_tenets"] == [] and again["placed_files"] == {}
