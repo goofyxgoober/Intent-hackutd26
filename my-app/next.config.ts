@@ -1,7 +1,9 @@
 import type { NextConfig } from "next";
 
+// Python backend (FastAPI). Proxied so the session cookie stays same-origin.
+const BACKEND = process.env.BACKEND_URL ?? "http://localhost:8000";
+
 const nextConfig: NextConfig = {
-  /* config options here */
   cacheComponents: true,
   partialPrefetching: true,
   turbopack: {
@@ -11,6 +13,13 @@ const nextConfig: NextConfig = {
         as: "*.css",
       },
     },
+  },
+  async rewrites() {
+    return [
+      { source: "/auth/me", destination: `${BACKEND}/auth/me` },
+      { source: "/auth/logout", destination: `${BACKEND}/auth/logout` },
+      { source: "/api/:path*", destination: `${BACKEND}/api/:path*` },
+    ];
   },
 };
 
