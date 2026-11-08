@@ -34,7 +34,7 @@ def test_initial_sync_executes_pipeline_and_starts_grilling(c):
     # Root system tenet created
     root = next((t for t in tenets if t["parent_id"] is None), None)
     assert root is not None
-    assert "System" in root["name"]
+    assert root["name"] == "Legacy"  # named after the repo (acme/legacy), not a canned label
 
     # Subsystem tenets created with code links
     assert len(tenets) > 1
@@ -42,8 +42,8 @@ def test_initial_sync_executes_pipeline_and_starts_grilling(c):
     assert len(leaf_tenets) > 0
     assert any(len(t["code_links"]) > 0 for t in leaf_tenets)
 
-    # Requirement claims created
-    assert len(claims) > 0
+    # No pre-written claims: Hypotheses come from grilling the user (spec 10.2)
+    assert claims == {}
 
     # Annotations created
     annot = c.get(url(c, "/annotations"), params={"path": "src/auth/session.py"}).json()
@@ -72,8 +72,9 @@ def test_initial_sync_executes_pipeline_and_starts_grilling(c):
 
     grill_batch_info = batch.get("grill")
     assert grill_batch_info is not None
-    assert grill_batch_info["questions_count"] == 3
+    assert 1 <= grill_batch_info["questions_count"] <= 3
     assert grill_batch_info["tenet_id"] == root["id"]
+    assert grill_batch_info["level"] == 0
 
 
 def test_explicit_pipeline_endpoint(c, gh):
@@ -95,8 +96,8 @@ def test_explicit_pipeline_endpoint(c, gh):
     assert res["requirements"]["tenets_created"] >= 1
 
     # Step 4: Grilling
-    assert res["grill"]["questions_count"] == 3
-    assert len(res["grill"]["questions"]) == 3
+    assert 1 <= res["grill"]["questions_count"] <= 3
+    assert len(res["grill"]["questions"]) == res["grill"]["questions_count"]
     first_q = res["grill"]["questions"][0]
     assert "text" in first_q
     assert "why" in first_q
@@ -108,4 +109,4 @@ def test_workspace_pipeline_endpoint(c, gh):
     assert res["status"] == "success"
     assert res["pulled_code"]["files_extracted"] > 0
     assert res["requirements"]["spec_compiled"] is True
-    assert res["grill"]["questions_count"] == 3
+    assert 1 <= res["grill"]["questions_count"] <= 3

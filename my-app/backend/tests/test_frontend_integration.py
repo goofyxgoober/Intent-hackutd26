@@ -243,7 +243,7 @@ def test_interactive_grilling_and_chatbot_flow():
     r_start = auth_client.post("/api/repos/test-team/superdoc-repo/grill/start")
     assert r_start.status_code == 200
     grill_data = r_start.json()
-    assert grill_data["questions_count"] == 3
+    assert 1 <= grill_data["questions_count"] <= 3
     first_q = grill_data["questions"][0]
     assert "text" in first_q
     assert len(first_q["options"]) >= 2
@@ -253,7 +253,7 @@ def test_interactive_grilling_and_chatbot_flow():
     assert r_status.status_code == 200
     status_data = r_status.json()
     assert status_data["active"] is True
-    assert status_data["total_questions"] == 3
+    assert status_data["total_questions"] == grill_data["questions_count"]
 
     # Answer question 1 via option choice "A"
     r_ans = auth_client.post("/api/repos/test-team/superdoc-repo/grill/answer", json={
@@ -263,7 +263,7 @@ def test_interactive_grilling_and_chatbot_flow():
     assert r_ans.status_code == 200
     ans_data = r_ans.json()
     assert ans_data["ok"] is True
-    assert ans_data["candidate_invariant"] is not None
+    assert ans_data["recorded_answer"] == first_q["options"][0]  # "A" resolves to the full option
     assert ans_data["next_question"] is not None
     assert ans_data["answered_count"] == 1
 

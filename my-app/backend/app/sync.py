@@ -278,6 +278,9 @@ async def _process(workspace_id: int, source: str, token: Optional[str], head: O
             grill_info = {
                 "session_id": grill_state["id"],
                 "tenet_id": grill_state["tenet_id"],
+                "tenet_name": grill_state.get("tenet_name"),
+                "level": grill_state.get("level", 0),
+                "level_name": grill_state.get("level_name"),
                 "questions_count": len(grill_state["questions"]),
             }
 

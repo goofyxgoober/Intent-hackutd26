@@ -1,0 +1,177 @@
+"""Intent Builder grilling: the hierarchy is built level by level from the user's answers."""
+import pytest
+
+from app import grill, pipeline
+from app.actors import Actor
+from app.config import settings
+from app.intent.store import IntentStore
+
+FILES = [
+    "src/auth/session.py",
+    "src/auth/token.py",
+    "src/db/user.py",
+    "src/db/pool.py",
+    "web/app.ts",
+]
+WS = 42
+
+
+@pytest.fixture
+def store(tmp_path, monkeypatch):
+    monkeypatch.setattr(settings, "data_dir", str(tmp_path / "data"))
+    monkeypatch.setenv("INTENT_MAX_DEPTH", "3")
+    monkeypatch.setattr(grill, "_llm_json", lambda *a, **k: None)  # offline unless a test scripts it
+    s = IntentStore(WS)
+    s.put_imports({"head": "x", "files": [{"path": p, "size": 1, "language": "python"} for p in FILES],
+                   "edges": [], "external": []})
+    engine = Actor(kind="engine", name="t")
+    s.put_annotation(engine, "src/auth/session.py", {"summary": {"purpose": "Validates session tokens.",
+                                                                 "invariants": ["Expired tokens are rejected"]}})
+    pipeline.generate_requirements_and_tenets(s, {"files": [{"path": p} for p in FILES]}, "acme/legacy")
+    return s
+
+
+def tree(store):
+    t = store.tenets()
+    return t, {tid: IntentStore.level(t, tid) for tid in t}
+
+
+def answer_all(max_steps=60, reply="A"):
+    """Answer every question with `reply`; return the (tenet_id, level) of each tenet grilled, in order."""
+    visited = []
+    status = grill.get_grill_status(WS)
+    for _ in range(max_steps):
+        if not status.get("active"):
+            break
+        if not visited or visited[-1][0] != status["tenet_id"]:
+            visited.append((status["tenet_id"], status["level"]))
+        grill.submit_grill_answer(WS, reply)
+        status = grill.get_grill_status(WS)
+    return visited
+
+
+def test_pipeline_makes_root_and_features_without_canned_claims(store):
+    tenets, levels = tree(store)
+    root = next(t for t in tenets.values() if not t["parent_id"])
+    assert root["name"] == "Legacy"
+    features = sorted(tenets[c]["name"] for c in root["children"])
+    assert features == ["Auth", "Db", "Web"]
+    assert store.claims() == {}  # Hypotheses come from grilling, not pre-written
+    auth = next(t for t in tenets.values() if t["name"] == "Auth")
+    assert "Validates session tokens." in auth["functionality"]  # from the file's own annotation
+
+
+def test_grilling_builds_the_hierarchy_level_by_level(store):
+    start = grill.start_grill_session(WS)
+    assert start["level"] == 0 and start["level_name"] == "system"
+    assert 1 <= len(start["questions"]) <= 3
+
+    visited = answer_all()
+    levels_in_order = [lvl for _, lvl in visited]
+    assert levels_in_order == sorted(levels_in_order), "a deeper level started before the one above finished"
+    assert levels_in_order[0] == 0 and set(levels_in_order) >= {0, 1, 2}
+
+    tenets, levels = tree(store)
+    assert max(levels.values()) >= 2, "grilling should build tenets below the features"
+    auth = next(t for t in tenets.values() if t["name"] == "Auth")
+    assert sorted(tenets[c]["name"] for c in auth["children"]) == ["Session", "Token"]
+    # code links live on leaves only, and every file is still covered exactly once
+    for t in tenets.values():
+        if t["children"]:
+            assert t["code_links"] == []
+    leaf_files = sorted(l["path"] for t in tenets.values() if not t["children"] for l in t["code_links"])
+    assert leaf_files == sorted(FILES)
+    assert grill.get_grill_status(WS)["done"] is True
+
+
+def test_answers_become_hypotheses_verbatim_without_fake_tests(store):
+    grill.start_grill_session(WS)
+    status = grill.get_grill_status(WS)
+    rule = "Expired session tokens must be rejected with 401 before any DB lookup"
+    for q in status["questions"]:
+        text = rule if q["text"].startswith("What must ") else "A"
+        grill.submit_grill_answer(WS, text, question_id=q["id"])
+    claims = list(store.claims().values())
+    assert [c["statement"] for c in claims] == [rule]
+    assert claims[0]["status"] == "hypothesis"
+    assert claims[0]["test_implementation"] == ""  # the Test Author writes real tests later
+    assert claims[0]["provenance"]["via"] == "grilling"
+
+
+def test_typed_correction_replaces_the_draft(store):
+    grill.start_grill_session(WS)
+    first = grill.get_grill_status(WS)["current_question"]
+    correction = "A billing system that charges customers monthly"
+    grill.submit_grill_answer(WS, correction, question_id=first["id"])
+    while grill.get_grill_status(WS)["tenet_name"] == "Legacy" and grill.get_grill_status(WS)["active"]:
+        grill.submit_grill_answer(WS, "", dont_know=True)
+    root = next(t for t in store.tenets().values() if not t["parent_id"])
+    assert root["functionality"] == correction
+
+
+def test_dont_know_is_recorded_and_never_blocks(store):
+    grill.start_grill_session(WS)
+    for _ in range(3):
+        if not grill.get_grill_status(WS)["active"]:
+            break
+        grill.submit_grill_answer(WS, "", dont_know=True)
+    state = grill.load_grill_state(WS)
+    assert state["unknowns"] and store.claims() == {}
+    assert grill.get_grill_status(WS)["level"] == 1  # moved on to the features
+
+
+def test_user_can_refuse_a_split(store):
+    grill.start_grill_session(WS)
+    while grill.get_grill_status(WS)["level"] == 0:
+        grill.submit_grill_answer(WS, "A")
+    status = grill.get_grill_status(WS)
+    auth_id = status["tenet_id"]
+    for q in status["questions"]:
+        grill.submit_grill_answer(WS, "B" if q["text"].startswith("I'd split") else "A", question_id=q["id"])
+    auth = store.tenet(auth_id)
+    assert auth["children"] == [] and len(auth["code_links"]) == 2
+
+
+def test_max_depth_stops_splitting(store, monkeypatch):
+    monkeypatch.setenv("INTENT_MAX_DEPTH", "1")
+    grill.start_grill_session(WS)
+    answer_all()
+    tenets, levels = tree(store)
+    assert max(levels.values()) == 1
+
+
+def test_llm_drives_questions_and_split(store, monkeypatch):
+    calls = []
+
+    def fake_llm(system, prompt, max_tokens=2500):
+        calls.append(prompt)
+        if "at most 3 short questions" in prompt:
+            return {"draft": "LLM draft", "questions": [
+                {"text": "I think this handles sign-in. Right?", "why": "w", "options": ["Yes", "No"]}]}
+        if '"children"' in prompt and '"Auth"' in prompt:
+            return {"functionality": "Signs users in.",
+                    "hypotheses": [{"statement": "Expired tokens are rejected", "test_explanation": "t"}],
+                    "children": [
+                        {"name": "Session checks", "functionality": "f", "files": ["src/auth/session.py", "not/in/scope.py"]},
+                    ]}
+        return {"functionality": "", "hypotheses": [], "children": []}
+
+    monkeypatch.setattr(grill, "_llm_json", fake_llm)
+    grill.start_grill_session(WS)
+    assert grill.get_grill_status(WS)["current_question"]["text"] == "I think this handles sign-in. Right?"
+    answer_all()
+
+    tenets, levels = tree(store)
+    auth = next(t for t in tenets.values() if t["name"] == "Auth")
+    assert auth["functionality"] == "Signs users in."
+    kids = {tenets[c]["name"]: tenets[c] for c in auth["children"]}
+    # invented paths are dropped; files the LLM left out go to an "Other" child so nothing is lost
+    assert [l["path"] for l in kids["Session checks"]["code_links"]] == ["src/auth/session.py"]
+    assert [l["path"] for l in kids["Other Auth code"]["code_links"]] == ["src/auth/token.py"]
+    assert [store.claim(c)["statement"] for c in auth["claims"]] == ["Expired tokens are rejected"]
+    assert any("Signs users in" in p or "sign-in" in p for p in calls[1:]), "answers feed the next prompts"
+
+
+def test_old_session_files_are_ignored(store):
+    grill.save_grill_state(WS, {"id": "old", "tenet_id": "t_x", "questions": []})
+    assert grill.get_grill_status(WS)["active"] is False
