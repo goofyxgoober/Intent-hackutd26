@@ -40,7 +40,7 @@ class FakeGitHub:
         if p == "/user":
             return httpx.Response(200, json={
                 "id": 7, "login": "ayaan", "name": "Ayaan", "avatar_url": "a", "html_url": "h",
-                "two_factor_authentication": self.two_factor,
+                **({} if self.two_factor is None else {"two_factor_authentication": self.two_factor}),
             })
         if p == "/user/repos":
             return httpx.Response(200, json=[{
@@ -162,6 +162,20 @@ def test_rejects_account_without_2fa(fake):
     with TestClient(app, follow_redirects=False) as c:
         assert login(c).headers["location"].endswith("/login?error=2fa_required")
         assert c.get("/auth/me").status_code == 401
+
+
+def test_2fa_not_reported_gets_its_own_error(fake, caplog):
+    fake.two_factor = None  # GitHub left the field out
+    with TestClient(app, follow_redirects=False) as c:
+        assert login(c).headers["location"].endswith("/login?error=2fa_unknown")
+    assert "did not report 2FA status" in caplog.text
+
+
+def test_error_responses_carry_codes(fake):
+    with TestClient(app) as c:
+        r = c.get("/api/repos")
+        assert r.status_code == 401 and r.json()["code"] == "UNAUTHENTICATED"
+        assert c.get("/no/such/route").json()["code"] == "NOT_FOUND"
 
 
 def test_2fa_check_can_be_disabled(fake, monkeypatch):

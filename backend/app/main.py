@@ -4,7 +4,7 @@ from contextlib import asynccontextmanager
 from fastapi import FastAPI
 from fastapi.middleware.cors import CORSMiddleware
 
-from . import auth, db, events, github, repos, sync, webhooks
+from . import auth, db, errors, events, github, repos, sync, webhooks
 from .intent import routes as intent_routes
 from .config import settings
 
@@ -18,6 +18,7 @@ async def lifespan(_: FastAPI):
 
 
 app = FastAPI(title="IntentFlow API", lifespan=lifespan)
+errors.install(app)
 
 app.add_middleware(
     CORSMiddleware,

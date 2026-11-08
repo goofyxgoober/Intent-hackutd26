@@ -9,7 +9,7 @@ ID = r"^[tc]_[A-Za-z0-9]{6,32}$"
 class Provenance(BaseModel):
     run_id: Optional[str] = None
     commit_range: Optional[str] = None
-    via: Optional[Literal["grilling", "test_generation", "jev", "remake", "manual", "sync"]] = None
+    via: Optional[Literal["grilling", "test_generation", "jev", "remake", "manual", "sync", "chat"]] = None
 
 
 class CodeLink(BaseModel):
