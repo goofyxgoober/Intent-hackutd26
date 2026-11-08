@@ -50,9 +50,21 @@ def test_initial_sync_executes_pipeline_and_starts_grilling(c):
     assert "summary" in annot
     assert "chunks" in annot
 
+    # Codebase view carries annotations directly
+    codebase_view = c.get(url(c, "/codebase")).json()
+    auth_file = next(f for f in codebase_view["files"] if f["path"] == "src/auth/session.py")
+    assert auth_file["annotated"] is True
+    assert auth_file["annotation"] is not None
+    assert "purpose" in auth_file["annotation"]
+
     # Spec compiled
     spec_file = Path(settings.data_dir) / "workspaces" / str(c.wid) / "intent" / "spec" / "compiled.json"
     assert spec_file.exists()
+    import json
+    spec_data = json.loads(spec_file.read_text())
+    assert "sections" in spec_data
+    assert any(len(s.get("code_links", [])) > 0 for s in spec_data["sections"])
+    assert any(len(s.get("annotations", [])) > 0 for s in spec_data["sections"])
 
     # 4. Start tenet grilling process
     session_file = Path(settings.data_dir) / "workspaces" / str(c.wid) / "intent" / ".sessions" / f"grill_ws_{c.wid}.json"

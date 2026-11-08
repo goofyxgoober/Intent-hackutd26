@@ -90,6 +90,8 @@ class SpecCompiler:
                 "title": t.name,
                 "tenet_id": t.id,
                 "functionality": t.functionality,
+                "code_links": [],
+                "annotations": [],
                 "requirements": [],
                 "subsections": [],
             }
@@ -97,6 +99,33 @@ class SpecCompiler:
             lines.append("")
             lines.append(f"> {t.functionality}")
             lines.append("")
+
+            # Implementation Code & Annotations
+            if getattr(t, "code_links", None):
+                lines.append("**Implementation Code & Annotations:**")
+                for link in t.code_links:
+                    path = getattr(link, "file", None) or getattr(link, "path", None)
+                    if not path and isinstance(link, dict):
+                        path = link.get("file") or link.get("path")
+                    if not path:
+                        continue
+                    start_l = getattr(link, "start_line", None) if not isinstance(link, dict) else link.get("start_line")
+                    end_l = getattr(link, "end_line", None) if not isinstance(link, dict) else link.get("end_line")
+                    range_str = f" (lines {start_l}-{end_l})" if start_l and end_l else ""
+                    sec_dict["code_links"].append({"file": path, "start_line": start_l, "end_line": end_l})
+
+                    annot = self.store.get_annotation(path) if hasattr(self.store, "get_annotation") else None
+                    if annot and "summary" in annot:
+                        summary = annot["summary"]
+                        purpose = summary.get("purpose", "") if isinstance(summary, dict) else str(summary)
+                        responsibilities = summary.get("responsibilities", []) if isinstance(summary, dict) else []
+                        sec_dict["annotations"].append({"file": path, "purpose": purpose, "responsibilities": responsibilities})
+                        lines.append(f"- `{path}`{range_str}: {purpose}")
+                        if responsibilities:
+                            lines.append(f"  - *Core responsibilities:* {', '.join(responsibilities[:3])}")
+                    else:
+                        lines.append(f"- `{path}`{range_str}")
+                lines.append("")
 
             t_claims = claims_by_tenet.get(t.id, [])
             # Axioms first

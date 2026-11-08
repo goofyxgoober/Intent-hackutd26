@@ -486,10 +486,14 @@ def test_spec_compiler(tmp_store, engine, sample_tree):
     leaf_claim.test_explanation = "Acceptance: cart validation fails on empty input."
     tmp_store.put_claim(leaf_claim, Actor.USER)
 
+    tmp_store.put_annotation("cart.py", {"summary": {"purpose": "Cart validation logic", "responsibilities": ["Check item counts"]}}, Actor.ENGINE)
+
     compiler = SpecCompiler(tmp_store)
     spec = compiler.compile(include_hypotheses=True)
 
     assert "# System Specification" in spec.markdown
     assert "Cart cannot be empty on checkout" in spec.markdown
     assert "Acceptance: cart validation fails on empty input." in spec.markdown
+    assert "cart.py" in spec.markdown
+    assert "Cart validation logic" in spec.markdown
     assert len(spec.sections) > 0

@@ -296,15 +296,26 @@ async def _process(workspace_id: int, source: str, token: Optional[str], head: O
     snapshot = await codebase.snapshot_repo(token, full_name, head, extract_dir=repo_dir)
     store.put_imports(snapshot)
 
-    # Update annotations for modified files if not already annotated
+    # Update annotations for modified/added files, keeping them in sync with git diffs
+    import hashlib
     actor_engine = pipeline.Actor(kind="engine", name="pipeline")
     for f in cmp["files"]:
         p = f["path"]
-        if codebase.language(p) and not store.get_annotation(p):
-            src_file = repo_dir / p
-            if src_file.exists():
-                annot = pipeline.generate_annotations_for_file(p, src_file.read_text(encoding="utf-8", errors="replace"))
-                store.put_annotation(actor_engine, p, annot)
+        status = f.get("status")
+        if codebase.language(p):
+            if status == "removed":
+                annot_file = store._path("annotations", f"{p}.json")
+                if annot_file.exists():
+                    annot_file.unlink()
+            elif status in ("modified", "added"):
+                src_file = repo_dir / p
+                if src_file.exists():
+                    content = src_file.read_text(encoding="utf-8", errors="replace")
+                    new_hash = hashlib.sha256(content.encode("utf-8")).hexdigest()
+                    existing = store.get_annotation(p)
+                    if not existing or (existing.get("file_hash") and existing.get("file_hash") != new_hash):
+                        annot = pipeline.generate_annotations_for_file(p, content)
+                        store.put_annotation(actor_engine, p, annot)
 
     changed = [f["path"] for f in cmp["files"]] + list(renames)
     deleted = [f["path"] for f in cmp["files"] if f["status"] == "removed"]

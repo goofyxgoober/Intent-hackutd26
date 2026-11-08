@@ -179,29 +179,44 @@ def generate_requirements_and_tenets(store: IntentStore, snapshot: dict, full_na
             )
             created_claims.append(claim["id"])
 
-    # 3. Compile Spec document
+    # 3. Compile Spec document with code links and annotations
+    sections = []
+    for t in store.tenets().values():
+        links = t.get("code_links", [])
+        annots = []
+        for l in links:
+            lp = l.get("path") or l.get("file")
+            if lp:
+                a = store.get_annotation(lp)
+                if a and "summary" in a:
+                    s = a["summary"]
+                    purpose = s.get("purpose", "") if isinstance(s, dict) else str(s)
+                    resp = s.get("responsibilities", []) if isinstance(s, dict) else []
+                    annots.append({"path": lp, "purpose": purpose, "responsibilities": resp})
+
+        sections.append({
+            "tenet_id": t["id"],
+            "name": t["name"],
+            "functionality": t["functionality"],
+            "code_links": links,
+            "annotations": annots,
+            "requirements": [
+                {
+                    "id": cid,
+                    "statement": store.claim(cid)["statement"],
+                    "status": store.claim(cid)["status"],
+                }
+                for cid in t["claims"]
+            ],
+        })
+
     spec_data = {
         "title": f"{repo_title} Requirements Specification",
         "compiled_at": time.time(),
         "root_tenet": root_id,
         "tenets_count": len(store.tenets()),
         "claims_count": len(store.claims()),
-        "sections": [
-            {
-                "tenet_id": t["id"],
-                "name": t["name"],
-                "functionality": t["functionality"],
-                "requirements": [
-                    {
-                        "id": cid,
-                        "statement": store.claim(cid)["statement"],
-                        "status": store.claim(cid)["status"],
-                    }
-                    for cid in t["claims"]
-                ],
-            }
-            for t in store.tenets().values()
-        ],
+        "sections": sections,
     }
     spec_dir = store._path("spec")
     spec_dir.mkdir(parents=True, exist_ok=True)

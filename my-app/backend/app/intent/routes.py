@@ -278,12 +278,23 @@ def codebase_view(wa=WA) -> dict:
             folders.setdefault(parent, set()).add(child)
             if i < len(parts) - 1:
                 folders.setdefault(child, set())
+    files_out = []
+    for f in snap["files"]:
+        p = f["path"]
+        a = store.get_annotation(p)
+        annot_summary = a.get("summary") if a and isinstance(a, dict) else None
+        files_out.append({
+            **f,
+            "annotated": p in annotated,
+            "annotation": annot_summary,
+            "tenets": by_file.get(p, []),
+        })
+
     return {
         "head": snap["head"],
         "folders": [{"path": p, "name": posixpath.basename(p) or "/", "children": sorted(c)}
                     for p, c in sorted(folders.items())],
-        "files": [{**f, "annotated": f["path"] in annotated, "tenets": by_file.get(f["path"], [])}
-                  for f in snap["files"]],
+        "files": files_out,
         "edges": snap["edges"],
         "external": snap["external"],
     }
