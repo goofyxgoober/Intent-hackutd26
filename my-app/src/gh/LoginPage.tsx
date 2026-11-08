@@ -10,6 +10,8 @@ const ERROR_MESSAGES: Record<string, string> = {
   invalid_state: "oauth state mismatch — session expired, try again",
   token_exchange_failed: "could not exchange code for access token",
   user_fetch_failed: "signed in, but GET /user failed",
+  "2fa_unknown":
+    "GitHub didn't report whether two-factor authentication is on for this account. if it is on, ask whoever runs the backend to set REQUIRE_GITHUB_2FA=false",
   "2fa_required":
     "two-factor authentication is off on this GitHub account. turn it on in GitHub → Settings → Password and authentication, then sign in again",
 };

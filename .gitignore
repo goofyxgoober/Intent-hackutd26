@@ -1,0 +1,15 @@
+# The app lives in my-app/ (it has its own .gitignore). These rules cover the repo root,
+# including leftovers from the old layout (backend/ and frontend/ at the top level),
+# so secrets and local environments are never committed by accident.
+.env
+.env.*
+!.env.example
+.venv/
+node_modules/
+__pycache__/
+*.pyc
+*.db
+data/
+.pytest_cache/
+.DS_Store
+*:Zone.Identifier

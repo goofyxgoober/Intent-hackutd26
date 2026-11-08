@@ -238,7 +238,8 @@ def test_only_user_promotes_and_needs_a_pass(c, tree):
     cl = claim(c, tree["validate"])
     promote = lambda **kw: c.post(url(c, f"/claims/{cl['id']}/promote"), json=kw)
     assert c.post(url(c, f"/claims/{cl['id']}/promote"), json={}, headers=as_agent("builder")).status_code == 403
-    assert promote().status_code == 409  # untested
+    untested = promote()
+    assert untested.status_code == 409 and untested.json()["code"] == "NOT_VERIFIED"
     run(c, cl, "fail", code_ref="v1")
     assert promote().status_code == 409
     run(c, cl, "pass", code_ref="v2")  # code changed between runs: not flaky
@@ -271,6 +272,7 @@ def test_promotion_is_bottom_up(c, tree):
     run(c, feature, "pass")
     r = c.post(url(c, f"/claims/{feature['id']}/promote"), json={})
     assert r.status_code == 409 and r.json()["detail"]["unmet"] == [leaf["id"]]
+    assert r.json()["code"] == "DEPENDENCY_NOT_READY" and r.json()["detail"]["blockers"] == [leaf["id"]]
     run(c, leaf, "pass")  # passing is enough; locking also works
     assert c.post(url(c, f"/claims/{feature['id']}/promote"), json={}).json()["status"] == "axiom"
 
@@ -292,11 +294,12 @@ def test_agents_never_edit_axioms(c, tree):
     ax = _axiom(c, tree["validate"])
     for role in ("builder", "engine"):
         r = c.patch(url(c, f"/claims/{ax['id']}"), json={"statement": "x"}, headers=as_agent(role))
-        assert r.status_code == 403
+        assert r.status_code == 403 and r.json()["code"] == "AXIOM_LOCKED"
         r = c.put(url(c, f"/claims/{ax['id']}/axiom"), json={"statement": "x", "acknowledge_warning": True, "reason": "r"},
                   headers=as_agent(role))
         assert r.status_code == 403
-    assert c.patch(url(c, f"/claims/{ax['id']}"), json={"statement": "x"}).status_code == 409  # users use the warned flow
+    r = c.patch(url(c, f"/claims/{ax['id']}"), json={"statement": "x"})  # users use the warned flow
+    assert r.status_code == 409 and r.json()["code"] == "AXIOM_LOCKED"
 
 
 def test_hand_edit_of_axiom_needs_warning_and_flags_dependents(c, tree):
@@ -488,6 +491,23 @@ def test_export_commits_folder_to_intent_branch(c, gh, tree):
     assert gh.trees["tree1"]["tree"] == [{"path": ".intentflow", "mode": "040000", "type": "tree", "sha": "tree0"}]
     assert gh.branches["intentflow/intents"] == "newcommit"
     assert c.post(url(c, "/export"), headers=as_agent("engine")).status_code == 403
+
+
+def test_flags_are_announced_live(c, tree):
+    ax = _axiom(c, tree["validate"])
+    with c.websocket_connect(f"/ws/workspaces/{c.wid}") as ws:
+        ws.receive_json()  # hello
+        run(c, ax, "fail", notes="got 200 for an expired token")
+        seen = [ws.receive_json() for _ in range(2)]
+    flag = next(e for e in seen if e["type"] == "flag.raised")
+    assert flag["claim_id"] == ax["id"] and flag["kind"] == "test_failure" and flag["status"] == "axiom"
+    assert flag["reason"] == "got 200 for an expired token"
+
+
+def test_chat_provenance_is_accepted(c, tree):
+    r = c.post(url(c, f"/tenets/{tree['validate']}/claims"),
+               json={"statement": "user's own words", "provenance": {"via": "chat"}})
+    assert r.status_code == 201 and r.json()["provenance"]["via"] == "chat"
 
 
 def test_websocket_streams_workspace_events(c, tree):
