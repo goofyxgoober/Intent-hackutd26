@@ -259,6 +259,16 @@ def build_snapshot(files: List[dict], sources: Dict[str, str], head: str) -> dic
     return {"head": head, "files": files, "edges": edges, "external": external}
 
 
-async def snapshot_repo(token: str, full_name: str, ref: str) -> dict:
+def extract_repo(sources: Dict[str, str], dest_dir: Path) -> None:
+    dest_dir.mkdir(parents=True, exist_ok=True)
+    for path, content in sources.items():
+        out_p = dest_dir / path
+        out_p.parent.mkdir(parents=True, exist_ok=True)
+        out_p.write_text(content, encoding="utf-8", errors="replace")
+
+
+async def snapshot_repo(token: str, full_name: str, ref: str, extract_dir: Optional[Path] = None) -> dict:
     files, sources = read_tarball(await fetch_tarball(token, full_name, ref))
+    if extract_dir is not None:
+        extract_repo(sources, extract_dir)
     return build_snapshot(files, sources, ref)
