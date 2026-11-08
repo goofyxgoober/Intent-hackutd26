@@ -51,16 +51,23 @@ export function RepoPanel({ owner, repo, changes, tab, onTab, historyPath, onHis
 function ChangesTab({ changes, gh, onHistory }: { changes: Changes | null; gh: string; onHistory: (p: string) => void }) {
   if (!changes) return <p className="hand dim lead">Reading the repository…</p>;
   if (changes.initial_sync)
-    return <p className="hand lead">Not synced yet. Sync to set a baseline for tracking changes.</p>;
+    return <p className="hand lead">Not synced yet. Sync to ingest the repo and set a baseline.</p>;
+  if (changes.initial)
+    return <p className="hand lead">Ingested {plural(changes.file_count ?? 0, "file")}. Changes are tracked from here.</p>;
   if (changes.files.length === 0) return <p className="hand lead">Up to date with the last sync.</p>;
   const range = `${shortSha(changes.base ?? "")} → ${shortSha(changes.head)}`;
   return (
     <>
       <p className="hand lead">
-        {changes.stale_marked !== undefined
+        {changes.synced
           ? `${plural(changes.files.length, "file")} modified in this sync (${range}).`
           : `${plural(changes.files.length, "file")} modified since the last sync (${range}).`}
       </p>
+      {changes.affected_tenets.length > 0 && (
+        <p className="dim small">
+          {plural(changes.affected_tenets.length, "tenet")} affected · {plural(changes.rerun_claims.length, "claim")} to re-test
+        </p>
+      )}
       <FileDiffList
         files={changes.files}
         rawDiffUrl={changes.base ? `${gh}/diff?base=${changes.base}&head=${changes.head}` : undefined}

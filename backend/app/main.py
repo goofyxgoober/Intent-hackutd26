@@ -1,15 +1,18 @@
+import asyncio
 from contextlib import asynccontextmanager
 
 from fastapi import FastAPI
 from fastapi.middleware.cors import CORSMiddleware
 
-from . import auth, db, github, repos, webhooks
+from . import auth, db, events, github, repos, webhooks
+from .intent import routes as intent_routes
 from .config import settings
 
 
 @asynccontextmanager
 async def lifespan(_: FastAPI):
     db.init_db()
+    events.bind_loop(asyncio.get_running_loop())
     yield
 
 
@@ -27,6 +30,8 @@ app.include_router(auth.router)
 app.include_router(github.router)
 app.include_router(repos.router)
 app.include_router(webhooks.router)
+app.include_router(intent_routes.router)
+app.include_router(intent_routes.ws_router)
 
 
 @app.get("/health")

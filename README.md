@@ -26,48 +26,78 @@ Sign-in is GitHub OAuth. GitHub asks for the user's 2FA code during login, and t
 backend also rejects any account that doesn't have 2FA turned on
 (`REQUIRE_GITHUB_2FA=true`, the default). Set it to `false` for test accounts.
 
-### API
-All `/api` routes need a signed-in session. Data is stored per user **and** per repo
-in SQLite (`DATABASE_PATH`, default `backend/intentflow.db`).
+## Intent engine backend (spec: IntentFlow Intent Engine Specification)
 
+The backend owns the intent folder and enforces the spec's non-negotiable rules
+(section 3) and permission matrix (section 7). Rules are checked in
+`backend/app/intent/store.py`, never left to prompts.
+
+### Who is calling
+| Caller | How | Can |
+|---|---|---|
+| User | GitHub session cookie | Everything a user can in section 7; the only one who promotes, demotes, hand-edits Axioms, dismisses flags, exports |
+| `builder` agent (Intent Builder, Test Author, Remake) | `Authorization: Bearer <key>` | Create/edit Tenets and Hypotheses, add references, scrap and remake. Never touches Axioms |
+| `test_runner` agent | `Authorization: Bearer <key>` | Append results only |
+| `engine` agent (Annotator, Jev, link builder, Spec Compiler) | `Authorization: Bearer <key>` | Code links, annotations, spec, Jev verdicts, Tenet edits |
+
+Keys come from `AGENT_KEYS` in `backend/.env`. Agents may send `X-Agent-Name` for provenance.
+
+### Storage
+Each connected repo is a **workspace** (its id is returned by `/api/repos/{owner}/{repo}/connect`).
+Its intent folder lives at `backend/data/workspaces/<id>/intent/` with the section 6 layout
+(`tenets/`, `claims/`, `results/`, `annotations/`, `links/`, `history/`, `spec/`, `changelog/`).
+**Export** commits it to `.intentflow/` on the `intentflow/intents` branch, with Tenets in nested
+folders mirroring ownership and `results/` gitignored. It never writes to the default branch.
+
+### Workspace API (`/api/workspaces/{id}`)
+| Method | Path | Who | Purpose |
+|---|---|---|---|
+| GET | `/tree` | all | Tenets with level, leaf flag, A/H counts, roll-up verdict, flags; all live Claims with result summaries |
+| POST | `/tenets` | user, builder, engine | Create a Tenet (`parent_id` null = root; only one root) |
+| GET/PATCH/DELETE | `/tenets/{id}` | user, builder, engine | Read (with footprint) / edit name, functionality, child order, cross-cutting / delete (refused if it holds Axioms, has children, or is referenced) |
+| POST | `/tenets/{id}/move` | user, builder, engine | New parent; Claims untouched |
+| POST/DELETE | `/tenets/{id}/references[/{target}]` | user, builder, engine | Composition references; cycles rejected; `REFERENCE_SCOPE` limits targets |
+| PUT | `/tenets/{id}/links` | engine | Code links (leaves only) |
+| GET | `/tenets/{id}/rejected` | all | Rejected interpretations for the Remake Agent |
+| POST | `/tenets/{id}/claims` | user, builder, engine | New Hypothesis |
+| GET/PATCH | `/claims/{id}` | all / user, builder, engine | Read / edit a Hypothesis (Axioms refused) |
+| PUT | `/claims/{id}/axiom` | user | Hand edit with `acknowledge_warning` + `reason`; 428 returns the impact summary first |
+| GET | `/claims/{id}/impact` | all | Demotion/edit ripple: dependents, integration Claims above, referencing Tenets, linked code, stale results, provisional spec sections |
+| POST | `/claims/{id}/promote` | user | Needs a passing, non-flaky result for the current wording and passing/locked dependencies; or `accept_without_verification` (badged) |
+| POST | `/claims/{id}/demote` | user | Reason required; snapshots, flags dependents, stales their results |
+| POST | `/claims/{id}/scrap`, `/remake` | user, builder | Scrap Hypotheses (never Axioms); remake must differ from rejected readings |
+| DELETE | `/claims/{id}/flags/{kind}` | user | Dismiss a flag |
+| POST/GET | `/claims/{id}/results` | test_runner / all | Append-only runs bound to `claim_hash`; send `code_ref` for the determinism check |
+| GET/PUT | `/annotations?path=` | all / engine | Annotator output per file |
+| GET/PUT | `/spec` | all / engine | Compiled spec |
+| POST | `/jev/verdicts` | engine | Typed Jev output; unknown ids rejected; `update_existing` on an Axiom rejected; `axiom_conflict` flags Axioms |
+| GET | `/codebase` | all | Folder tree, files (annotated?, constraining Tenets), import edges, external packages |
+| GET | `/sync/batches[/{id}]` | all | Debounced push batches: changed files, renames, affected Tenets, Claims to re-run, orphans |
+| GET | `/inbox`, `/changelog`, `/history?kind=` | all | Review inbox, decision log, snapshots |
+| POST | `/export` | user | Commit the intent folder to `intentflow/intents` |
+| WS | `/ws/workspaces/{id}` | all (`?key=` for agents) | Live events: `tenet.*`, `claim.*`, `result.appended`, `sync.batch`, `jev.verdict`, ... |
+
+### Git sync
+Pushes to the default branch arrive by webhook, wait `SYNC_DEBOUNCE_SECONDS` for more, then
+become one batch: the codebase snapshot (file tree + import edges) updates first, renames carry
+annotations and links, and the batch lists affected Tenets (leaf links propagated up through
+owners and references) and Claims to re-test. Jev reviews it via `/jev/verdicts` with `batch_id`.
+The last-synced commit is the diff base, so force pushes need no replay. **sync repo** does the
+same on demand. GitHub tokens are held in memory only.
+
+### Other routes
 | Method | Path | Purpose |
 |---|---|---|
-| GET | `/auth/github/login` | Redirects to GitHub (sets CSRF `state` cookie) |
-| GET | `/auth/github/callback` | Exchanges code, checks 2FA, creates session |
-| GET | `/auth/me` · POST `/auth/logout` | Current user · end session |
-| GET | `/api/github/repos` | Repos the user can access |
-| GET | `/api/github/repos/{owner}/{repo}/tree?ref=` | All file paths |
-| GET | `/api/github/repos/{owner}/{repo}/file?path=&ref=` | One file's text |
-| GET | `/api/github/repos/{owner}/{repo}/branches` | Branch names and head SHAs |
-| GET | `/api/github/repos/{owner}/{repo}/commits?ref=&path=&limit=` | Commit history; `path` gives one file's history |
-| GET | `/api/github/repos/{owner}/{repo}/commits/{sha}` | One commit with every changed file and its diff |
-| GET | `/api/github/repos/{owner}/{repo}/compare?base=&head=` | Commits and file diffs between any two branches, tags or SHAs |
-| GET | `/api/github/repos/{owner}/{repo}/diff?sha=` or `?base=&head=` | Full unified diff as text, for files GitHub leaves out of the JSON |
-| GET | `/api/repos` | Repos this user connected |
-| POST | `/api/repos/{owner}/{repo}/connect` | Connect a repo (checks access) |
-| DELETE | `/api/repos/{owner}/{repo}` | Disconnect and delete its intents |
-| GET | `/api/repos/{owner}/{repo}/changes` | Files modified since last sync + affected intents (read-only) |
-| POST | `/api/repos/{owner}/{repo}/sync` | Accept current head; flags intents on modified files `stale` |
-| GET | `/api/repos/{owner}/{repo}/activity` | File changes received by the webhook |
-| GET | `/api/repos/{owner}/{repo}/intents?stale=&source_file=` | List intent nodes |
-| GET | `/api/repos/{owner}/{repo}/intents/{node_id}/history` | Commits that touched the intent's source file |
-| GET/PUT/DELETE | `/api/repos/{owner}/{repo}/intents/{node_id}` | Read / upsert / delete one node. PUT takes `?expected_version=` and returns 409 on a conflicting edit |
-| GET/PUT | `/api/repos/{owner}/{repo}/graph` | Whole IntentGraph; PUT replaces it (for the intent engine) |
-| POST | `/api/repos/{owner}/{repo}/intents/export` | Commit the graph to `.intentflow/intent_graph.json` on branch `intentflow/intents` |
+| GET | `/auth/github/login` · `/auth/github/callback` · `/auth/me` · POST `/auth/logout` | Sign-in |
+| GET | `/api/github/repos[/{owner}/{repo}/…]` | Repos, branches, tree, file, commits, commit detail, compare, raw diff |
+| GET/POST/DELETE | `/api/repos[/{owner}/{repo}[/connect\|/changes\|/sync]]` | Connect a repo (= workspace), preview changes, sync |
 | POST | `/webhooks/github` | GitHub push webhook (HMAC-verified) |
-
-Changed files come back as `{path, previous_path, status, additions, deletions, patch, patch_truncated}`.
-When `patch_truncated` is true GitHub skipped that file's diff (too large or binary); use `/diff`.
-Refs and paths are validated so they can't reach other GitHub API routes.
-
-Intent nodes follow the `IntentNode` schema in CONTEXT.md. `downstream_dependencies`
-become `depends_on` edges automatically. Saving a node clears its `stale` flag.
 
 ### Push webhook (optional)
 GitHub must reach your backend, so locally run `ngrok http 8000`, then in the repo's
 **Settings → Webhooks → Add webhook** use `https://<ngrok-host>/webhooks/github`,
 content type `application/json`, and the same secret as `GITHUB_WEBHOOK_SECRET`.
-Without a webhook, **sync repo** still finds every change through the compare API.
+Without a webhook, **sync repo** does the same work on demand.
 
 ### Tests
 ```bash
@@ -75,6 +105,3 @@ cd backend
 pip install -r requirements-dev.txt
 python -m pytest
 ```
-
-The GitHub access token stays on the backend; the browser only holds an opaque
-httpOnly session cookie.

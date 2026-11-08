@@ -39,9 +39,11 @@ export function StatusBar({ sync }: { sync: string }) {
   return (
     <footer className="statusbar">
       <div>
-        <span className="dim">ast parser:</span> tree-sitter (Indra)
+        <span className="dim">annotation:</span> LLM, two-pass (Indra)
         <span className="sep">·</span>
-        <span className="dim">graph:</span> NetworkX (Vishjit)
+        <span className="dim">import edges:</span> pattern matching
+        <span className="sep">·</span>
+        <span className="dim">views:</span> Vishjit
         <span className="sep">·</span>
         <span className="dim">github sync:</span> {sync}
       </div>

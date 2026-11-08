@@ -27,31 +27,27 @@ CREATE TABLE IF NOT EXISTS repos (
     connected_at    REAL NOT NULL,
     UNIQUE (user_id, full_name)
 );
-CREATE TABLE IF NOT EXISTS intent_nodes (
-    repo_id     INTEGER NOT NULL REFERENCES repos(id) ON DELETE CASCADE,
-    node_id     TEXT NOT NULL,
-    source_file TEXT NOT NULL,
-    data        TEXT NOT NULL,
-    version     INTEGER NOT NULL DEFAULT 1,
-    stale       INTEGER NOT NULL DEFAULT 0,
-    updated_at  REAL NOT NULL,
-    PRIMARY KEY (repo_id, node_id)
+CREATE TABLE IF NOT EXISTS push_events (
+    id           INTEGER PRIMARY KEY,
+    repo_id      INTEGER NOT NULL REFERENCES repos(id) ON DELETE CASCADE,
+    before_sha   TEXT NOT NULL,
+    after_sha    TEXT NOT NULL,
+    forced       INTEGER NOT NULL DEFAULT 0,
+    commit_count INTEGER NOT NULL DEFAULT 0,
+    messages     TEXT NOT NULL DEFAULT '[]',
+    received_at  REAL NOT NULL,
+    batch_id     INTEGER
 );
-CREATE INDEX IF NOT EXISTS idx_intent_source ON intent_nodes(repo_id, source_file);
-CREATE TABLE IF NOT EXISTS intent_edges (
-    repo_id  INTEGER NOT NULL REFERENCES repos(id) ON DELETE CASCADE,
-    source   TEXT NOT NULL,
-    target   TEXT NOT NULL,
-    relation TEXT NOT NULL,
-    PRIMARY KEY (repo_id, source, target, relation)
-);
-CREATE TABLE IF NOT EXISTS file_events (
+CREATE TABLE IF NOT EXISTS sync_batches (
     id          INTEGER PRIMARY KEY,
     repo_id     INTEGER NOT NULL REFERENCES repos(id) ON DELETE CASCADE,
-    commit_sha  TEXT NOT NULL,
-    path        TEXT NOT NULL,
+    base_sha    TEXT,
+    head_sha    TEXT NOT NULL,
     status      TEXT NOT NULL,
-    received_at REAL NOT NULL
+    source      TEXT NOT NULL,
+    data        TEXT NOT NULL DEFAULT '{}',
+    created_at  REAL NOT NULL,
+    reviewed_at REAL
 );
 """
 
@@ -85,28 +81,6 @@ def upsert_user(github_id: int, login: str) -> int:
             (github_id, login, now, now),
         )
         return conn.execute("SELECT id FROM users WHERE github_id = ?", (github_id,)).fetchone()["id"]
-
-
-def mark_stale(conn: sqlite3.Connection, repo_id: int, paths: "set[str]") -> int:
-    if not paths:
-        return 0
-    marks = ",".join("?" * len(paths))
-    cur = conn.execute(
-        f"UPDATE intent_nodes SET stale = 1 WHERE repo_id = ? AND source_file IN ({marks})",
-        (repo_id, *paths),
-    )
-    return cur.rowcount
-
-
-def intents_for_paths(conn: sqlite3.Connection, repo_id: int, paths: "set[str]") -> "list[str]":
-    if not paths:
-        return []
-    marks = ",".join("?" * len(paths))
-    rows = conn.execute(
-        f"SELECT node_id FROM intent_nodes WHERE repo_id = ? AND source_file IN ({marks}) ORDER BY node_id",
-        (repo_id, *paths),
-    ).fetchall()
-    return [r["node_id"] for r in rows]
 
 
 def fetch_repo(user_id: int, full_name: str) -> Optional[sqlite3.Row]:

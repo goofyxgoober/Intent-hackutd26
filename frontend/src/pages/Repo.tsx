@@ -1,76 +1,79 @@
-import { useCallback, useEffect, useRef, useState } from "react";
+import { useCallback, useEffect, useMemo, useRef, useState } from "react";
 import { Link, useParams } from "react-router-dom";
-import { api, type Changes, type IntentNode } from "../api";
+import { api, type Changes } from "../api";
 import { useAuth } from "../auth/AuthContext";
-import { NodeCard, Stages, StatusBar, Terminal, TopBar } from "../components/Chrome";
+import { Stages, StatusBar, Terminal, TopBar } from "../components/Chrome";
+import { IntentPanel } from "../components/IntentPanel";
 import { RepoPanel, type RepoTab } from "../components/RepoPanel";
+import { workspaceApi, type TreeView } from "../intentApi";
+import { useWorkspaceEvents, type WorkspaceEvent } from "../useWorkspaceEvents";
 
-const blankIntent = (): IntentNode => ({
-  node_id: "new_intent",
-  name: "",
-  source_file: "",
-  intent_summary: "",
-  inputs: {},
-  outputs: {},
-  business_invariants: [],
-  downstream_dependencies: [],
-});
-
-function stripMeta(n: IntentNode): IntentNode {
-  const { version: _v, stale: _s, updated_at: _u, ...rest } = n;
-  return rest;
-}
+type Line = { text: string; tone?: "green" | "red" | "dim" };
 
 export default function Repo() {
   const { owner = "", repo = "" } = useParams();
   const { user, logout } = useAuth();
   const base = `/api/repos/${owner}/${repo}`;
 
+  const [workspaceId, setWorkspaceId] = useState<number | null>(null);
   const [changes, setChanges] = useState<Changes | null>(null);
-  const [intents, setIntents] = useState<IntentNode[] | null>(null);
-  const [log, setLog] = useState<{ text: string; tone?: "green" | "red" | "dim" }[]>([]);
-  const [editing, setEditing] = useState<{ original: IntentNode | null; text: string } | null>(null);
+  const [tree, setTree] = useState<TreeView | null>(null);
+  const [log, setLog] = useState<Line[]>([]);
   const [tab, setTab] = useState<RepoTab>("changes");
   const [historyPath, setHistoryPath] = useState<string | null>(null);
-  const panelRef = useRef<HTMLDivElement>(null);
   const [busy, setBusy] = useState(false);
+  const panelRef = useRef<HTMLDivElement>(null);
+  const wsApi = useMemo(() => (workspaceId === null ? null : workspaceApi(workspaceId)), [workspaceId]);
 
-  const say = (text: string, tone?: "green" | "red" | "dim") =>
-    setLog((l) => [...l.slice(-30), { text, tone }]);
+  const say = useCallback((text: string, tone?: Line["tone"]) => setLog((l) => [...l.slice(-40), { text, tone }]), []);
 
-  const loadIntents = useCallback(async () => {
-    setIntents(await api<IntentNode[]>(`${base}/intents`));
-  }, [base]);
-
-  const load = useCallback(async () => {
-    try {
-      await api(`${base}/connect`, { method: "POST" });
-      const [c] = await Promise.all([api<Changes>(`${base}/changes`), loadIntents()]);
-      setChanges(c);
-    } catch (e) {
-      say(`✗ ${(e as Error).message}`, "red");
-    }
-  }, [base, loadIntents]);
+  const loadTree = useCallback(async () => {
+    if (wsApi) setTree(await wsApi.tree());
+  }, [wsApi]);
 
   useEffect(() => {
-    load();
-  }, [load]);
+    (async () => {
+      try {
+        const ws = await api<{ id: number }>(`${base}/connect`, { method: "POST" });
+        setWorkspaceId(ws.id);
+        setChanges(await api<Changes>(`${base}/changes`));
+      } catch (e) {
+        say(`✗ ${(e as Error).message}`, "red");
+      }
+    })();
+  }, [base, say]);
+
+  useEffect(() => {
+    loadTree().catch((e: Error) => say(`✗ ${e.message}`, "red"));
+  }, [loadTree, say]);
+
+  // Agents (and other tabs) change the tree; refresh on their events.
+  const live = useWorkspaceEvents(workspaceId, (e: WorkspaceEvent) => {
+    if (e.type === "hello") return;
+    if (e.type === "sync.batch") {
+      const b = e.batch as { id: number; source: string; affected_tenets: string[] };
+      if (b.source === "webhook") say(`⇣ push received · batch ${b.id} · ${b.affected_tenets.length} tenets affected`, "dim");
+    }
+    else if (e.type === "jev.verdict") say(`jev → ${e.verdict} (${e.confidence}): ${e.reason}`, e.verdict === "axiom_conflict" ? "red" : "dim");
+    else if (e.type === "result.appended") say(`test ${e.claim_id} → ${e.verdict}`, e.verdict === "fail" ? "red" : "dim");
+    loadTree().catch(() => undefined);
+  });
 
   async function sync() {
     setBusy(true);
     say(`${user!.login}@intentflow:~$ sync ${owner}/${repo}`);
     try {
       const r = await api<Changes>(`${base}/sync`, { method: "POST" });
-      say(
-        r.initial_sync
-          ? `✓ baseline set at ${r.head.slice(0, 7)}. future changes are tracked from here.`
-          : `✓ ${r.files.length} files changed · ${r.stale_marked ?? 0} intents flagged stale`,
-        "green",
-      );
-      // Keep showing what this sync covered; the next preview starts from the new head.
-      setChanges(r);
+      if (r.status === "up_to_date") say("✓ already up to date.", "green");
+      else if (r.initial) say(`✓ ingested ${r.file_count ?? 0} files at ${r.head.slice(0, 7)}. baseline set.`, "green");
+      else
+        say(
+          `✓ ${r.files.length} files changed · ${r.affected_tenets.length} tenets affected · ${r.rerun_claims.length} claims to re-test`,
+          "green",
+        );
+      setChanges({ ...r, synced: true });
       setTab("changes");
-      await loadIntents();
+      await loadTree();
     } catch (e) {
       say(`✗ ${(e as Error).message}`, "red");
     } finally {
@@ -78,25 +81,13 @@ export default function Repo() {
     }
   }
 
-  async function save() {
-    if (!editing) return;
-    let node: IntentNode;
-    try {
-      node = JSON.parse(editing.text);
-    } catch {
-      say("✗ intent JSON is invalid. check commas and quotes.", "red");
-      return;
-    }
+  async function exportFolder() {
+    if (!wsApi) return;
     setBusy(true);
+    say(`${user!.login}@intentflow:~$ export intent folder`);
     try {
-      const params = editing.original?.version ? `?expected_version=${editing.original.version}` : "";
-      const saved = await api<IntentNode>(`${base}/intents/${encodeURIComponent(node.node_id)}${params}`, {
-        method: "PUT",
-        body: JSON.stringify(node),
-      });
-      say(`✓ saved ${saved.node_id} (v${saved.version})`, "green");
-      setEditing(null);
-      await loadIntents();
+      const r = await wsApi.exportFolder();
+      say(r.changed ? `✓ committed ${r.files} files to ${r.branch} (${r.commit_sha.slice(0, 7)})` : "✓ nothing changed since the last export", "green");
     } catch (e) {
       say(`✗ ${(e as Error).message}`, "red");
     } finally {
@@ -104,36 +95,8 @@ export default function Repo() {
     }
   }
 
-  async function remove(node: IntentNode) {
-    setBusy(true);
-    try {
-      await api(`${base}/intents/${encodeURIComponent(node.node_id)}`, { method: "DELETE" });
-      say(`✓ deleted ${node.node_id}`, "green");
-      setEditing(null);
-      await loadIntents();
-    } catch (e) {
-      say(`✗ ${(e as Error).message}`, "red");
-    } finally {
-      setBusy(false);
-    }
-  }
-
-  async function exportIntents() {
-    setBusy(true);
-    say(`${user!.login}@intentflow:~$ export intents`);
-    try {
-      const r = await api<{ branch: string; path: string; commit_sha: string }>(`${base}/intents/export`, {
-        method: "POST",
-      });
-      say(`✓ committed ${r.path} to ${r.branch} (${r.commit_sha.slice(0, 7)})`, "green");
-    } catch (e) {
-      say(`✗ ${(e as Error).message}`, "red");
-    } finally {
-      setBusy(false);
-    }
-  }
-
-  const affected = new Set(changes?.affected_intents ?? []);
+  const axioms = tree ? Object.values(tree.claims).filter((c) => c.status === "axiom").length : 0;
+  const hypotheses = tree ? Object.values(tree.claims).filter((c) => c.status === "hypothesis").length : 0;
 
   return (
     <div className="app">
@@ -159,8 +122,8 @@ export default function Repo() {
           <button className="btn" onClick={sync} disabled={busy}>
             sync repo
           </button>
-          <button className="btn" onClick={exportIntents} disabled={busy || !intents?.length}>
-            export intents
+          <button className="btn" onClick={exportFolder} disabled={busy || !tree?.tenets.length}>
+            export intent
           </button>
         </div>
       </div>
@@ -168,107 +131,22 @@ export default function Repo() {
       <main className="canvas repo-canvas">
         <section className="col">
           <div ref={panelRef}>
-            <RepoPanel
-              owner={owner}
-              repo={repo}
-              changes={changes}
-              tab={tab}
-              onTab={setTab}
-              historyPath={historyPath}
-              onHistoryPath={setHistoryPath}
-            />
+            <RepoPanel owner={owner} repo={repo} changes={changes} tab={tab} onTab={setTab}
+              historyPath={historyPath} onHistoryPath={setHistoryPath} />
           </div>
-
-          <div className="section-head">
-            <h2 className="hand">functional intents</h2>
-            <button className="btn" onClick={() => setEditing({ original: null, text: JSON.stringify(blankIntent(), null, 2) })}>
-              + new intent
-            </button>
-          </div>
-
-          {editing && (
-            <NodeCard name={editing.original ? `edit ${editing.original.node_id}` : "new intent"} tag="IntentNode JSON">
-              <textarea
-                id="intent-editor"
-                className="editor"
-                spellCheck={false}
-                value={editing.text}
-                onChange={(e) => setEditing({ ...editing, text: e.target.value })}
-              />
-              <div className="row-actions">
-                <button className="btn primary" onClick={save} disabled={busy}>
-                  save
-                </button>
-                <button className="btn" onClick={() => setEditing(null)}>
-                  cancel
-                </button>
-                {editing.original && (
-                  <button className="btn danger" onClick={() => remove(editing.original!)} disabled={busy}>
-                    delete
-                  </button>
-                )}
-              </div>
-            </NodeCard>
-          )}
-
-          {intents && intents.length === 0 && !editing && (
-            <p className="hand dim empty">No intents stored for this repo yet. Add one, or let the intent engine fill them in.</p>
-          )}
-          <div className="intent-grid">
-            {intents?.map((n) => (
-              <NodeCard
-                key={n.node_id}
-                name={n.node_id}
-                tag={n.stale ? "stale" : affected.has(n.node_id) ? "file changed" : `v${n.version}`}
-                tagTone={n.stale || affected.has(n.node_id) ? "warn" : "muted"}
-                summary={n.intent_summary || n.name}
-                className={n.stale ? "node-stale" : ""}
-              >
-                <div className="mono-list">
-                  <div>{n.source_file}</div>
-                  {n.business_invariants.slice(0, 2).map((inv) => (
-                    <div key={inv}>• {inv}</div>
-                  ))}
-                </div>
-                <div className="card-actions">
-                  <button
-                    className="link-purple as-button"
-                    onClick={() => setEditing({ original: n, text: JSON.stringify(stripMeta(n), null, 2) })}
-                  >
-                    [edit intent]
-                  </button>
-                  <button
-                    className="link-purple as-button"
-                    onClick={() => {
-                      setHistoryPath(n.source_file);
-                      setTab("history");
-                      panelRef.current?.scrollIntoView({ behavior: "smooth", block: "start" });
-                    }}
-                  >
-                    [history]
-                  </button>
-                </div>
-              </NodeCard>
-            ))}
-          </div>
+          {wsApi && <IntentPanel tree={tree} wsApi={wsApi} say={say} onChanged={() => loadTree()} />}
         </section>
 
         <Terminal className="dash-terminal">
           <div className="line">
             <span className="purple">⚡ TARGET →</span> {owner}/{repo} ·{" "}
-            <span className="purple">{intents?.length ?? 0} intents</span>
+            <span className="purple">{tree?.tenets.length ?? 0} tenets</span>
           </div>
           <div className="line dim">
-            last sync →{" "}
-            {changes?.stale_marked !== undefined
-              ? changes.head.slice(0, 7)
-              : changes?.base
-                ? changes.base.slice(0, 7)
-                : "never"} · stale →{" "}
-            {intents?.filter((n) => n.stale).length ?? 0}
+            axioms → {axioms} · hypotheses → {hypotheses} · live → <span className={live ? "green" : "red"}>{live ? "on" : "off"}</span>
           </div>
           <div className="gap" />
-          {log.length === 0 && <div className="line dim">└ sync to track modified files; edit intents on the left.</div>}
+          {log.length === 0 && <div className="line dim">└ sync to ingest the repo; agents' changes appear here live.</div>}
           {log.map((l, i) => (
             <div key={i} className={`line ${l.tone ?? ""}`}>
               {l.text.includes("@intentflow:~$") ? <span className="purple">{l.text}</span> : l.text}

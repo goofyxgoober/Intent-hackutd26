@@ -10,6 +10,7 @@ export async function api<T>(path: string, init: RequestInit = {}): Promise<T> {
     try {
       const body = await res.json();
       if (typeof body.detail === "string") message = body.detail;
+      else if (body.detail && typeof body.detail.message === "string") message = body.detail.message;
       else if (Array.isArray(body.detail)) message = body.detail.map((d: { msg: string }) => d.msg).join("; ");
     } catch {
       /* keep default message */
@@ -17,20 +18,6 @@ export async function api<T>(path: string, init: RequestInit = {}): Promise<T> {
     throw new Error(message);
   }
   return res.status === 204 ? (undefined as T) : res.json();
-}
-
-export interface IntentNode {
-  node_id: string;
-  name: string;
-  source_file: string;
-  intent_summary: string;
-  inputs: Record<string, string>;
-  outputs: Record<string, string>;
-  business_invariants: string[];
-  downstream_dependencies: string[];
-  version?: number;
-  stale?: boolean;
-  updated_at?: number;
 }
 
 export interface ChangedFile {
@@ -73,9 +60,17 @@ export interface Comparison {
 export interface Changes {
   base: string | null;
   head: string;
-  initial_sync: boolean;
+  /** Preview only: nothing has been synced yet. */
+  initial_sync?: boolean;
+  /** Sync result: this sync ingested the repo for the first time. */
+  initial?: boolean;
+  /** Present when this object is the result of a sync rather than a preview. */
+  synced?: boolean;
+  status?: string;
+  file_count?: number;
   files: ChangedFile[];
   commits: CommitSummary[];
-  affected_intents: string[];
-  stale_marked?: number;
+  affected_tenets: string[];
+  changed_leaves: string[];
+  rerun_claims: string[];
 }

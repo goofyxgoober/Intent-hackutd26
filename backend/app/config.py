@@ -23,7 +23,15 @@ class Settings:
     database_path: str = os.getenv("DATABASE_PATH", "intentflow.db")
     webhook_secret: str = os.getenv("GITHUB_WEBHOOK_SECRET", "")
     intent_branch: str = os.getenv("INTENT_BRANCH", "intentflow/intents")
-    intent_file_path: str = os.getenv("INTENT_FILE_PATH", ".intentflow/intent_graph.json")
+    intent_folder: str = os.getenv("INTENT_FOLDER", ".intentflow")
+    # Where each connected repo's intent folder lives on the backend.
+    data_dir: str = os.getenv("DATA_DIR", "data")
+    # Agent API keys, "role:key" pairs separated by commas. Roles: builder, test_runner, engine.
+    agent_keys: str = os.getenv("AGENT_KEYS", "")
+    # Pushes arriving within this many seconds of each other are handled as one batch.
+    sync_debounce_seconds: float = float(os.getenv("SYNC_DEBOUNCE_SECONDS", "20"))
+    # "peer_children" (spec default) or "any": which Tenets a composition reference may target.
+    reference_scope: str = os.getenv("REFERENCE_SCOPE", "peer_children")
     session_cookie: str = "intentflow_session"
     state_cookie: str = "intentflow_oauth_state"
     session_ttl_seconds: int = 60 * 60 * 24 * 7
