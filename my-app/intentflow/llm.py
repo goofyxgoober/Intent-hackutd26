@@ -171,3 +171,71 @@ class FakeLLM:
                 continue
 
         raise StructuredFailure(f"Validation failed after {retries} retries: {last_err}")
+
+
+class FakeNemotron:
+    """Mock Nemotron LLM supporting per-tier queued responses for testing (Section 10)."""
+
+    def __init__(self, responses_by_tier: Optional[Dict[str, List[Any]]] = None, default_responses: Optional[List[Any]] = None):
+        self.tier_queues: Dict[str, List[Any]] = {k: list(v) for k, v in (responses_by_tier or {}).items()}
+        self.default_queue: List[Any] = list(default_responses or [])
+        self.calls: List[Dict[str, Any]] = []
+
+    def queue_response(self, tier: str, response: Any) -> None:
+        self.tier_queues.setdefault(tier, []).append(response)
+
+    def set_tier_responses(self, tier: str, responses: List[Any]) -> None:
+        self.tier_queues[tier] = list(responses)
+
+    async def structured(
+        self,
+        tier: str,
+        system: str,
+        user: str,
+        schema: Type[T],
+        *,
+        agent: str = "fake_nemotron",
+        context_tier: str = "graph",
+        thinking: bool = False,
+        medium_effort: bool = False,
+        max_tokens: int = 8000,
+        retries: int = 1,
+    ) -> T:
+        self.calls.append({
+            "tier": tier,
+            "system": system,
+            "user": user,
+            "schema": schema,
+            "agent": agent,
+            "context_tier": context_tier,
+            "thinking": thinking,
+        })
+        log_usage(agent, tier, 20, 20, context_tier)
+
+        last_err = ""
+        for attempt in range(retries + 1):
+            queue = self.tier_queues.get(tier)
+            resp = None
+            if queue and len(queue) > 0:
+                resp = queue.pop(0)
+            elif self.default_queue:
+                resp = self.default_queue.pop(0)
+            else:
+                raise StructuredFailure(f"FakeNemotron ran out of responses for tier {tier}")
+
+            if isinstance(resp, Exception):
+                raise resp
+            try:
+                if isinstance(resp, str):
+                    return schema.model_validate_json(resp)
+                if isinstance(resp, dict):
+                    return schema.model_validate(resp)
+                if isinstance(resp, schema):
+                    return resp
+                return resp
+            except (ValidationError, TypeError, ValueError) as e:
+                last_err = str(e)
+                continue
+
+        raise StructuredFailure(f"Validation failed after {retries} retries: {last_err}")
+

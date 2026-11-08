@@ -661,6 +661,23 @@ function Workspace() {
         onMinimizedChange={setTermMin}
         onSubmit={(raw) => void run(raw)}
         inputRef={inputRef}
+        selectedTenet={
+          view === "tenets" && tenetId && tenets.tree
+            ? tenets.tree.tenets.find((t) => t.id === tenetId)
+              ? { id: tenetId, name: tenets.tree.tenets.find((t) => t.id === tenetId)!.name }
+              : null
+            : null
+        }
+        onClearSelectedTenet={() => setTenetId(null)}
+        onOpenTenetsView={() => setView("tenets")}
+        onFocusFile={(filePath) => {
+          const n = Array.from(g.index?.nodes.values() ?? []).find((node) => node.source_file === filePath);
+          if (n) {
+            void select(n.node_id, false);
+          }
+        }}
+        onFocusTenet={(tid) => openTenet(tid)}
+        onFocusClaim={(cid) => openClaim(cid)}
       />
 
       <StatusBar g={g} focus={focus} view={view} tenets={tenets} />

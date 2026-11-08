@@ -352,6 +352,34 @@ input:focus-visible, textarea:focus-visible { outline-offset: 0; }
   .terminal input { background: transparent; box-shadow: inset 0 -1px 0 rgba(255, 255, 255, 0.14); border-radius: 0; padding: 0 4px; outline: 0; }
   .terminal input:focus { background: transparent; outline: 0; box-shadow: inset 0 -1.5px 0 var(--chalk-violet); }
   .terminal input::placeholder { color: var(--ink-5); }
+  .terminal .terminal-title { display: flex; align-items: center; justify-content: space-between; gap: 8px; }
+  .terminal .terminal-window-controls { display: flex; gap: 7px; align-items: center; }
+  .terminal .terminal-window-controls button { width: 9px; height: 9px; border-radius: 50%; border: 0; padding: 0; }
+  .terminal .terminal-title-text { font: 500 11px var(--font-mono); color: var(--ink-4); }
+  .terminal .terminal-target-pill { display: flex; align-items: center; }
+  .terminal .terminal-target-pill .pill { display: inline-flex; align-items: center; gap: 5px; padding: 2px 8px; border-radius: 6px; font: 500 10.5px var(--font-mono); }
+  .terminal .terminal-target-pill .pill.active { background: rgba(183, 109, 240, 0.12); color: var(--chalk-violet); border: 1px solid rgba(183, 109, 240, 0.28); }
+  .terminal .terminal-target-pill .pill.active b { color: var(--ink-hi); font-weight: 600; }
+  .terminal .terminal-target-pill .pill.empty { color: var(--ink-5); font-size: 10px; max-width: 240px; overflow: hidden; text-overflow: ellipsis; white-space: nowrap; }
+  .terminal .terminal-target-pill .pill-clear { width: auto !important; height: auto !important; border-radius: 3px !important; background: transparent !important; margin-left: 4px; padding: 0 2px !important; font-size: 9px; color: var(--ink-4); cursor: pointer; border: 0; line-height: 1; }
+  .terminal .terminal-target-pill .pill-clear:hover { color: var(--chalk-red, #c9706b); transform: scale(1.15) !important; filter: none !important; }
+  .terminal form .draft-hypotheses-btn { width: auto !important; height: 30px; padding: 0 10px; border-radius: 8px; font: 500 11.5px var(--font-ui); background: var(--slate-3); color: var(--ink-2); border: 1px solid var(--line-soft); white-space: nowrap; cursor: pointer; transition: background 0.14s, color 0.14s, opacity 0.14s; }
+  .terminal form .draft-hypotheses-btn:hover:not(:disabled) { background: var(--slate-4); color: var(--ink-hi); }
+  .terminal form .draft-hypotheses-btn:disabled { opacity: 0.35; cursor: not-allowed; }
+  .terminal-output .route-chip { display: inline-block; padding: 2px 7px; border-radius: 5px; font: 500 10px var(--font-mono); background: var(--slate-3); color: var(--chalk-violet); border: 1px solid rgba(183, 109, 240, 0.22); margin: 2px 0; }
+  .terminal-output .quick-reply-wrapper { display: inline-block; margin: 3px 2px; }
+  .terminal-output .terminal-quick-reply { display: inline-flex; align-items: center; gap: 4px; padding: 3px 9px; border-radius: 6px; font: 500 11px var(--font-ui); background: rgba(183, 109, 240, 0.12); color: var(--chalk-violet); border: 1px solid rgba(183, 109, 240, 0.25); cursor: pointer; transition: background 0.14s, transform 0.1s; }
+  .terminal-output .terminal-quick-reply:hover:not(:disabled) { background: rgba(183, 109, 240, 0.22); color: #fff; }
+  .terminal-output .terminal-quick-reply:disabled { opacity: 0.35; cursor: not-allowed; }
+  .terminal-output .citation-chip { display: inline-flex; align-items: center; gap: 3px; padding: 1px 6px; border-radius: 4px; font: 500 10.5px var(--font-mono); cursor: pointer; border: 1px solid transparent; vertical-align: baseline; margin: 0 2px; transition: background 0.12s, border-color 0.12s; }
+  .terminal-output .citation-chip.file-chip { background: rgba(56, 189, 248, 0.1); color: #38bdf8; border-color: rgba(56, 189, 248, 0.22); }
+  .terminal-output .citation-chip.file-chip:hover { background: rgba(56, 189, 248, 0.2); }
+  .terminal-output .citation-chip.tenet-chip { background: rgba(134, 184, 148, 0.1); color: var(--chalk-green); border-color: rgba(134, 184, 148, 0.22); }
+  .terminal-output .citation-chip.tenet-chip:hover { background: rgba(134, 184, 148, 0.2); }
+  .terminal-output .citation-chip.claim-chip { background: rgba(217, 194, 122, 0.1); color: var(--chalk-amber); border-color: rgba(217, 194, 122, 0.22); }
+  .terminal-output .citation-chip.claim-chip:hover { background: rgba(217, 194, 122, 0.2); }
+  .terminal-output .terminal-progress-line { display: flex; align-items: center; gap: 6px; font-size: 10.5px; font-style: italic; color: var(--ink-4); padding: 3px 0; }
+  .terminal-output .terminal-progress-line .pulse-indicator { color: var(--chalk-violet); }
 
   /* inspector */
   .inspector h2 { font: 400 30px/1.05 var(--font-hand); letter-spacing: 0; }

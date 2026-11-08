@@ -34,7 +34,7 @@ class Actor:
     def provenance(self, extra: Optional[dict] = None) -> dict:
         out = {"kind": "user" if self.is_user else "agent", "role": self.kind, "actor": self.name}
         if extra:
-            out.update({k: v for k, v in extra.items() if k in ("run_id", "commit_range", "via")})
+            out.update({k: v for k, v in extra.items() if k in ("run_id", "commit_range", "via", "decision_id", "decision_source")})
         return out
 
 

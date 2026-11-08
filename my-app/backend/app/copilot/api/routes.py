@@ -56,56 +56,25 @@ async def chat_with_agent(
     msg_db: Session = Depends(get_message_db),
 ):
     """
-    Primary endpoint for Agent 2. Omit session_id to start a new chat;
-    pass it to continue one. History is loaded from messages.db.
+    Primary endpoint for Agent 2 and Two-Mode Terminal.
+    Routes between Query Engine and Hypothesis Generation when workspace_id is provided,
+    or falls back to legacy graph chat when workspace_id is omitted.
     """
-    # 1. Existing session: validate it and load recent history
     session = None
-    history: List[ChatMessage] = []
     if request.session_id is not None:
         session = session_repo.get_session(meta_db, request.session_id)
         if session is None or session.team_id != user.team_id:
             raise HTTPException(status_code=404, detail="Session not found")
-        rows = message_repo.load_recent(msg_db, session.id, limit=HISTORY_LIMIT)
-        history = [
-            ChatMessage(role=m.role, content=m.content, timestamp=m.timestamp.isoformat())
-            for m in rows
-        ]
 
-    selected = request.selected_node_ids or (session.selected_node_ids if session else None) or None
-
-    # 2. Call the agent
-    try:
-        result = await agent.execute_chat(
-            user_message=request.message,
-            history=history,
-            selected_node_ids=selected,
-        )
-    except Exception as e:
-        raise HTTPException(status_code=500, detail=f"Agent error: {str(e)}")
-
-    # 3. New chat: create the session only now, so a failed agent call leaves no empty sessions
-    if session is None:
-        session = session_repo.create_session(
-            meta_db, user.team_id, user.id,
-            title=request.message,
-            selected_node_ids=request.selected_node_ids,
-        )
-
-    # 4. Save messages FIRST, then bump the counters (a crash in between is harmless)
-    message_repo.append_messages(msg_db, session.id, [
-        {"role": "user", "content": request.message},
-        {
-            "role": "assistant",
-            "content": result.content,
-            "token_metrics": result.token_metrics.model_dump(),
-            "retrieved_items": result.retrieved_items,
-            "agent_steps": result.agent_steps,
-        },
-    ])
-    session_repo.touch_session(meta_db, session.id, added_messages=2)
-
-    return ChatResponse(**result.model_dump(), session_id=session.id)
+    from app.chat_router import route_chat
+    return await route_chat(
+        request=request,
+        user=user,
+        session=session,
+        meta_db=meta_db,
+        msg_db=msg_db,
+        agent=agent,
+    )
 
 
 @router.post("/chat/compare", response_model=DualChatComparisonResponse)
@@ -328,19 +297,26 @@ async def get_metrics_summary(
     graph_store: BaseGraphStore = Depends(get_graph_store),
     agent: BaseLLMAgent = Depends(get_agent)
 ):
-    """Returns high-level graph and token reduction metrics."""
+    """Returns high-level graph and token reduction metrics, including terminal queries."""
     graph = graph_store.get_graph()
     total_nodes = len(graph.nodes)
     total_invariants = sum(len(n.business_invariants) for n in graph.nodes)
     token_calc = agent.calculate_token_savings([n.node_id for n in graph.nodes])
-    
+    from intentflow.agents.query_agent import get_query_metrics_summary
+    query_summary = get_query_metrics_summary()
+
     return {
         "repository": graph.repo_name,
         "total_intent_nodes": total_nodes,
         "total_edges": len(graph.edges),
         "total_business_invariants": total_invariants,
         "average_invariants_per_node": round(total_invariants / max(1, total_nodes), 1),
-        "benchmark_token_savings": token_calc
+        "benchmark_token_savings": token_calc,
+        "query_metrics": query_summary,
+        "total_queries": query_summary["total_queries"],
+        "tokens_saved": query_summary["tokens_saved"],
+        "tokens_raw_equivalent": query_summary["total_tokens_raw_equivalent"],
+        "tokens_context": query_summary["total_tokens_context"],
     }
 
 # ---------------------------------------------------------------------------
@@ -506,6 +482,25 @@ async def frontend_ask(
                     return FrontendAskResponse(answer="\n".join(reply_lines))
         except Exception:
             pass
+
+    ws_id = body.workspace_id or find_workspace_id_for_repo(repo)
+    if ws_id:
+        from app.chat_router import route_chat
+        req = SessionChatRequest(
+            message=body.question,
+            session_id=body.session_id,
+            workspace_id=ws_id,
+            selected_tenet_id=body.selected_tenet_id,
+            allow_generation=body.allow_generation,
+        )
+        fake_user = CurrentUser(id="frontend_user", username="dev", team_id="default_team")
+        chat_resp = await route_chat(req, user=fake_user, agent=agent)
+        return FrontendAskResponse(
+            answer=chat_resp.content,
+            route=chat_resp.route,
+            generation=chat_resp.generation,
+            query=chat_resp.query,
+        )
 
     user_prompt = body.question
     if body.context:

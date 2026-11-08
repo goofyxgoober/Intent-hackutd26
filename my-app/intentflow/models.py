@@ -4,8 +4,8 @@ import json
 import secrets
 import time
 from enum import Enum
-from typing import Any, Dict, List, Optional
-from pydantic import BaseModel, Field, model_validator
+from typing import Any, Dict, List, Literal, Optional
+from pydantic import BaseModel, ConfigDict, Field, model_validator
 
 
 class Status(str, Enum):
@@ -167,3 +167,130 @@ class PendingConfirmation(BaseModel):
     impact: Dict[str, Any] = Field(default_factory=dict)
     expires: float
     requires_reason: bool = False
+
+
+# ==============================================================================
+# Two-Mode Terminal (Query <-> Hypothesis Generation) Models
+# ==============================================================================
+
+class PromptVerdict(str, Enum):
+    QUERY = "query"
+    HYPOTHESIS_GENERATION = "hypothesis_generation"
+    AXIOM_MODIFICATION_REQUEST = "axiom_modification_request"
+
+
+class SourceRequest(BaseModel):
+    model_config = ConfigDict(extra="forbid")
+    path: str
+    start_line: int
+    end_line: int
+
+
+class QueryPlan(BaseModel):
+    model_config = ConfigDict(extra="forbid")
+    question_type: Literal["locate", "explain", "invariants", "dependencies", "impact", "overview", "other"] = "other"
+    files: List[str] = Field(default_factory=list, max_length=8)
+    tenets: List[str] = Field(default_factory=list, max_length=4)
+    claims: List[str] = Field(default_factory=list, max_length=10)
+    needs_source: bool = False
+    source_requests: List[SourceRequest] = Field(default_factory=list, max_length=6)
+    keywords: List[str] = Field(default_factory=list)
+    rounds: int = 1
+    fallback_used: bool = False
+
+
+class RouterResult(BaseModel):
+    model_config = ConfigDict(extra="forbid")
+    verdict: PromptVerdict
+    confidence: float = Field(default=0.0, ge=0.0, le=1.0)
+    reason: str = Field(default="", max_length=200)
+    requested_count: Optional[int] = Field(default=None, ge=1, le=5)
+    focus: Optional[str] = Field(default=None, max_length=200)
+    plan: Optional[QueryPlan] = None
+    degraded: bool = False
+
+    @model_validator(mode="after")
+    def sanitize_plan(self) -> "RouterResult":
+        # Discard plan if present with any non-query verdict (§2.2)
+        if self.verdict != PromptVerdict.QUERY:
+            self.plan = None
+        return self
+
+
+class JevDecision(BaseModel):
+    decision_id: str
+    verdict: PromptVerdict
+    confidence: float = Field(ge=0.0, le=1.0)
+    source: Literal["jev_llm", "explicit_user"] = "jev_llm"
+    approved: bool = False
+    gate_reason: Optional[str] = None
+    target_tenet_id: Optional[str] = None
+    degraded: bool = False
+    requested_count: Optional[int] = None
+    focus: Optional[str] = None
+    created_at: float = Field(default_factory=time.time)
+
+    def assert_authorizes_generation(self) -> None:
+        if not self.approved:
+            raise PermissionDenied(f"Decision does not authorize generation: {self.gate_reason}")
+        if self.verdict != PromptVerdict.HYPOTHESIS_GENERATION:
+            raise PermissionDenied(f"Verdict is {self.verdict}, not hypothesis_generation")
+        if not self.target_tenet_id:
+            raise PermissionDenied("Target tenet ID missing from decision")
+
+
+class CandidateReviewItem(BaseModel):
+    model_config = ConfigDict(extra="forbid")
+    index: int
+    contradicts_axiom_ids: List[str] = Field(default_factory=list)
+    testable: bool = True
+    semantic_duplicate_of: Optional[str] = None
+    issues: List[str] = Field(default_factory=list)
+
+
+class CandidateReviewResult(BaseModel):
+    model_config = ConfigDict(extra="forbid")
+    results: List[CandidateReviewItem] = Field(default_factory=list)
+
+
+class QueryAnswerPayload(BaseModel):
+    model_config = ConfigDict(extra="forbid")
+    answer: str
+    insufficient_context: bool = False
+    missing: List[str] = Field(default_factory=list)
+    confidence: float = 0.0
+    suggested_followups: List[str] = Field(default_factory=list)
+
+
+class Citation(BaseModel):
+    kind: Literal["file", "tenet", "claim"]
+    path: Optional[str] = None
+    start_line: Optional[int] = None
+    end_line: Optional[int] = None
+    id: Optional[str] = None
+    valid: bool = True
+
+
+class QueryResult(BaseModel):
+    run_id: str
+    question_type: str = "explain"
+    plan: Dict[str, Any] = Field(default_factory=dict)
+    citations: List[Dict[str, Any]] = Field(default_factory=list)
+    insufficient_context: bool = False
+    missing: List[str] = Field(default_factory=list)
+    suggested_followups: List[str] = Field(default_factory=list)
+    usage: Dict[str, Any] = Field(default_factory=dict)
+    warnings: List[str] = Field(default_factory=list)
+    error_code: Optional[str] = None
+    answer: str = ""
+
+
+class GenerationResult(BaseModel):
+    run_id: str
+    status: str = "completed"  # "completed" | "failed"
+    tenet_id: str
+    claims_created: List[Dict[str, Any]] = Field(default_factory=list)
+    dropped_candidates: List[Dict[str, Any]] = Field(default_factory=list)
+    error_code: Optional[str] = None
+    summary: str = ""
+

@@ -54,6 +54,9 @@ class ChatRequest(BaseModel):
 class SessionChatRequest(BaseModel):
     message: str = Field(..., description="User query / modernization command")
     session_id: Optional[str] = Field(default=None, description="Omit to start a new chat session")
+    workspace_id: Optional[int] = Field(default=None, description="Workspace ID for intent-backed sessions")
+    selected_tenet_id: Optional[str] = Field(default=None, description="Selected tenet from Tenets canvas")
+    allow_generation: bool = Field(default=True, description="Whether hypothesis generation is allowed")
     selected_node_ids: Optional[List[str]] = Field(default=None, description="Optional pinned or highlighted nodes")
 
 class TokenMetrics(BaseModel):
@@ -74,6 +77,9 @@ class SingleBotResponse(BaseModel):
 class ChatResponse(SingleBotResponse):
     """SingleBotResponse plus the session this exchange was saved under."""
     session_id: str
+    route: Optional[Dict[str, Any]] = None
+    generation: Optional[Dict[str, Any]] = None
+    query: Optional[Dict[str, Any]] = None
 
 class DualChatComparisonResponse(BaseModel):
     query: str
@@ -172,6 +178,7 @@ class MessageOut(BaseModel):
     token_metrics: Optional[TokenMetrics] = None
     retrieved_items: Optional[List[str]] = None
     agent_steps: Optional[List[str]] = None
+    meta_json: Optional[Dict[str, Any]] = None
 
 
 # ---------------------------------------------------------------------------
@@ -181,10 +188,17 @@ class MessageOut(BaseModel):
 class FrontendAskRequest(BaseModel):
     question: str
     context: Optional[str] = None
+    workspace_id: Optional[int] = None
+    selected_tenet_id: Optional[str] = None
+    allow_generation: bool = True
+    session_id: Optional[str] = None
 
 
 class FrontendAskResponse(BaseModel):
     answer: str
+    route: Optional[Dict[str, Any]] = None
+    generation: Optional[Dict[str, Any]] = None
+    query: Optional[Dict[str, Any]] = None
 
 
 class FrontendGeneratedTestItem(BaseModel):

@@ -112,6 +112,9 @@ class IntentStore:
             out[t["id"]] = t
         return out
 
+    def all_tenets(self) -> List[dict]:
+        return list(self.tenets().values())
+
     def claims(self, include_scrapped: bool = False) -> Dict[str, dict]:
         out = {}
         for f in self._path("claims").glob("*/*.json"):
@@ -119,6 +122,9 @@ class IntentStore:
             if include_scrapped or c["status"] != SCRAPPED:
                 out[c["id"]] = c
         return out
+
+    def all_claims(self, include_scrapped: bool = False) -> List[dict]:
+        return list(self.claims(include_scrapped=include_scrapped).values())
 
     def tenet(self, tid: str) -> dict:
         t = self._read(self._path("tenets", f"{tid}.json"))

@@ -983,6 +983,76 @@ export const commands: Command[] = [
     },
   },
   {
+    name: "hypothesize",
+    usage: "hypothesize [count] [focus]",
+    summary: "draft new unverified hypotheses for the selected tenet",
+    offline: false,
+    async run(args, ctx, raw) {
+      if (!ctx.selection.tenet_id) {
+        ctx.print("  Click a tenet node in the Tenets view, then ask me again.", "error");
+        ctx.print("  [Open Tenets view]", "accent");
+        return;
+      }
+      if (!ctx.source.ask) {
+        ctx.print("  agent not connected", "error");
+        return;
+      }
+      ctx.print("  generating hypotheses…", "muted");
+      try {
+        const reply = await ctx.source.ask(ctx.repo, raw || "/hypothesize", JSON.stringify(ctx.selection));
+        ctx.print(reply.answer.split("\n").map((l) => `  ${l}`));
+        if (ctx.sync) await ctx.sync();
+      } catch (e) {
+        ctx.print(`  hypothesis error: ${e instanceof Error ? e.message : String(e)}`, "error");
+      }
+    },
+  },
+  {
+    name: "hypotheses",
+    usage: "hypotheses [tenet]",
+    summary: "list open hypotheses for the selected or specified tenet",
+    offline: true,
+    run(args, ctx) {
+      const tid = args[0] || ctx.selection.tenet_id;
+      if (!tid || !ctx.tenets) {
+        ctx.print("  select a tenet first or specify tenet id", "error");
+        return;
+      }
+      const t = ctx.tenets.tenets.find((x) => x.id === tid);
+      if (!t) {
+        ctx.print(`  tenet ${tid} not found`, "error");
+        return;
+      }
+      const hyp = t.claims
+        .map((cid) => ctx.tenets?.claims[cid])
+        .filter((c) => c && c.status === "hypothesis");
+      ctx.print([`  ${t.name} (${t.id}) — ${hyp.length} open hypotheses:`, ...hyp.map((h) => `    [${h!.id}] ${h!.statement}`)]);
+    },
+  },
+  {
+    name: "ask",
+    usage: "ask <question>",
+    summary: "forced read-only query bypassing generation router",
+    offline: false,
+    async run(args, ctx, raw) {
+      if (!args.length) {
+        ctx.print("  usage: ask <question>", "error");
+        return;
+      }
+      if (!ctx.source.ask) {
+        ctx.print("  agent not connected", "error");
+        return;
+      }
+      ctx.print("  querying codebase…", "muted");
+      try {
+        const reply = await ctx.source.ask(ctx.repo, raw, JSON.stringify(ctx.selection));
+        ctx.print(reply.answer.split("\n").map((l) => `  ${l}`));
+      } catch (e) {
+        ctx.print(`  query error: ${e instanceof Error ? e.message : String(e)}`, "error");
+      }
+    },
+  },
+  {
     name: "clear",
     usage: "clear",
     summary: "clear the terminal",
@@ -1024,7 +1094,8 @@ export async function execute(raw: string, ctx: CommandContext): Promise<void> {
 
   // Natural-language question or grilling reply
   let f: Focus | null = null;
-  if (ctx.index) {
+  // Bypass client-side BM25 for workspace-backed / live sessions (server owns retrieval)
+  if (ctx.index && ctx.source.kind === "mock") {
     try {
       f = await ctx.query(raw);
     } catch {

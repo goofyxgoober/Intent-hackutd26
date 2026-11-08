@@ -1,6 +1,6 @@
 "use client";
 
-import { useEffect, useRef, useState, type FormEvent, type KeyboardEvent, type PointerEvent as RPointerEvent } from "react";
+import { useEffect, useRef, useState, type FormEvent, type KeyboardEvent, type PointerEvent as RPointerEvent, type ReactNode } from "react";
 import type { Line } from "@/lib/terminal/commands";
 
 interface Props {
@@ -14,9 +14,36 @@ interface Props {
   onMinimizedChange(min: boolean): void;
   onSubmit(raw: string): void;
   inputRef: React.RefObject<HTMLInputElement | null>;
+  selectedTenet?: { id: string; name: string } | null;
+  onClearSelectedTenet?(): void;
+  onFocusFile?(path: string, range?: string): void;
+  onFocusTenet?(tenetId: string): void;
+  onFocusClaim?(claimId: string): void;
+  onOpenTenetsView?(): void;
+  progressStatus?: string | null;
 }
 
-export function Terminal({ lines, prompt, title, open, minimized, busy, onOpenChange, onMinimizedChange, onSubmit, inputRef }: Props) {
+const CITATION_REGEX = /\[\[(file|tenet|claim):([^\]\s]+?)(?::(\d+-\d+))?\]\]/g;
+
+export function Terminal({
+  lines,
+  prompt,
+  title,
+  open,
+  minimized,
+  busy,
+  onOpenChange,
+  onMinimizedChange,
+  onSubmit,
+  inputRef,
+  selectedTenet,
+  onClearSelectedTenet,
+  onFocusFile,
+  onFocusTenet,
+  onFocusClaim,
+  onOpenTenetsView,
+  progressStatus,
+}: Props) {
   const [command, setCommand] = useState("");
   const [history, setHistory] = useState<string[]>([]);
   const [cursor, setCursor] = useState(-1);
@@ -25,7 +52,7 @@ export function Terminal({ lines, prompt, title, open, minimized, busy, onOpenCh
   const [hovered, setHovered] = useState(true);
   const [dragging, setDragging] = useState(false);
   const leaveTimer = useRef<ReturnType<typeof setTimeout>>(undefined);
-  // spring state: `target` is where the pointer wants the window, `pos` is where it visually is
+  // spring state
   const target = useRef({ x: 0, y: 0 });
   const pos = useRef({ x: 0, y: 0, vx: 0, vy: 0 });
   const raf = useRef(0);
@@ -73,7 +100,6 @@ export function Terminal({ lines, prompt, title, open, minimized, busy, onOpenCh
     e.preventDefault();
     const sx = e.clientX - target.current.x;
     const sy = e.clientY - target.current.y;
-    // untransformed layout box, so we can keep the window on-screen
     const r = el.getBoundingClientRect();
     const pr = parent.getBoundingClientRect();
     const baseL = r.left - pr.left - pos.current.x;
@@ -108,7 +134,7 @@ export function Terminal({ lines, prompt, title, open, minimized, busy, onOpenCh
 
   useEffect(() => {
     outRef.current?.scrollTo({ top: outRef.current.scrollHeight });
-  }, [lines, minimized]);
+  }, [lines, minimized, progressStatus]);
 
   function submit(e: FormEvent) {
     e.preventDefault();
@@ -129,6 +155,118 @@ export function Terminal({ lines, prompt, title, open, minimized, busy, onOpenCh
     }
   }
 
+  function renderFormattedLine(text: string, tone?: string): ReactNode {
+    // 1. Quick replies
+    if (text.includes("[Open Tenets view]")) {
+      return (
+        <span className="quick-reply-wrapper">
+          <button
+            type="button"
+            className="terminal-quick-reply"
+            onClick={() => onOpenTenetsView?.()}
+          >
+            Open Tenets view ↗
+          </button>
+        </span>
+      );
+    }
+    if (text.includes("[Ask as a question]")) {
+      return (
+        <span className="quick-reply-wrapper">
+          <button
+            type="button"
+            className="terminal-quick-reply"
+            onClick={() => onSubmit(`/ask ${command.trim() || "What does this tenet do?"}`)}
+          >
+            Ask as a question ↗
+          </button>
+        </span>
+      );
+    }
+    if (text.includes("[Draft hypotheses]")) {
+      return (
+        <span className="quick-reply-wrapper">
+          <button
+            type="button"
+            className="terminal-quick-reply"
+            disabled={!selectedTenet}
+            onClick={() => onSubmit("/hypothesize")}
+          >
+            Draft hypotheses ↗
+          </button>
+        </span>
+      );
+    }
+
+    // 2. Route Chips (§8.4)
+    if (text.trim().startsWith("Jev →")) {
+      return <span className="route-chip">{text.trim()}</span>;
+    }
+
+    // 3. Citations parsing (§8.5)
+    const elements: ReactNode[] = [];
+    let lastIndex = 0;
+    const matches = Array.from(text.matchAll(CITATION_REGEX));
+
+    if (matches.length === 0) {
+      return text || " ";
+    }
+
+    matches.forEach((m, idx) => {
+      if (m.index !== undefined && m.index > lastIndex) {
+        elements.push(text.slice(lastIndex, m.index));
+      }
+      const kind = m[1];
+      const targetStr = m[2];
+      const range = m[3];
+
+      if (kind === "file") {
+        elements.push(
+          <button
+            key={`file-${idx}`}
+            type="button"
+            className="citation-chip file-chip"
+            onClick={() => onFocusFile?.(targetStr, range)}
+            title={`Focus ${targetStr}${range ? ` lines ${range}` : ""}`}
+          >
+            📄 {targetStr}{range ? `:${range}` : ""}
+          </button>
+        );
+      } else if (kind === "tenet") {
+        elements.push(
+          <button
+            key={`tenet-${idx}`}
+            type="button"
+            className="citation-chip tenet-chip"
+            onClick={() => onFocusTenet?.(targetStr)}
+            title={`Focus tenet ${targetStr}`}
+          >
+            🏛️ {targetStr}
+          </button>
+        );
+      } else if (kind === "claim") {
+        elements.push(
+          <button
+            key={`claim-${idx}`}
+            type="button"
+            className="citation-chip claim-chip"
+            onClick={() => onFocusClaim?.(targetStr)}
+            title={`Inspect claim ${targetStr}`}
+          >
+            ⚡ {targetStr}
+          </button>
+        );
+      }
+      lastIndex = (m.index ?? 0) + m[0].length;
+    });
+
+    if (lastIndex < text.length) {
+      elements.push(text.slice(lastIndex));
+    }
+
+    return elements;
+  }
+
   if (!open) {
     return (
       <button className="open-terminal" onClick={() => onOpenChange(true)}>
@@ -146,12 +284,37 @@ export function Terminal({ lines, prompt, title, open, minimized, busy, onOpenCh
       onPointerLeave={leave}
     >
       <div className="terminal-title" onPointerDown={startDrag}>
-        <div>
+        <div className="terminal-window-controls">
           <button onClick={() => onOpenChange(false)} aria-label="Close terminal" />
           <button onClick={() => onMinimizedChange(true)} aria-label="Minimize terminal" />
           <button onClick={() => onMinimizedChange(false)} aria-label="Restore terminal" />
         </div>
-        <span>{title}</span>
+        <span className="terminal-title-text">{title}</span>
+
+        {/* Selected-Tenet Pill (§8.1) */}
+        <div className="terminal-target-pill">
+          {selectedTenet ? (
+            <span className="pill active" title={`Target tenet: ${selectedTenet.name} (${selectedTenet.id})`}>
+              Target: <b>{selectedTenet.name}</b>
+              <button
+                type="button"
+                className="pill-clear"
+                onClick={(e) => {
+                  e.stopPropagation();
+                  onClearSelectedTenet?.();
+                }}
+                aria-label="Deselect tenet"
+              >
+                ✕
+              </button>
+            </span>
+          ) : (
+            <span className="pill empty" title="Click a tenet node in the Tenets view to enable hypothesis drafting">
+              Target: none — click a tenet to draft hypotheses
+            </span>
+          )}
+        </div>
+
         <button className="collapse" onClick={() => onMinimizedChange(!minimized)}>
           {minimized ? "□" : "⌄"}
         </button>
@@ -161,9 +324,15 @@ export function Terminal({ lines, prompt, title, open, minimized, busy, onOpenCh
           <div className="terminal-output" ref={outRef} aria-live="polite">
             {lines.map((line) => (
               <div key={line.id} className={line.tone ?? ""}>
-                {line.text || " "}
+                {renderFormattedLine(line.text, line.tone)}
               </div>
             ))}
+            {/* Live Progress Stage Status Line (§3.3, §8.6) */}
+            {progressStatus ? (
+              <div className="terminal-progress-line muted">
+                <span className="pulse-indicator">●</span> {progressStatus}
+              </div>
+            ) : null}
           </div>
           <form onSubmit={submit}>
             <label htmlFor="command">
@@ -179,6 +348,20 @@ export function Terminal({ lines, prompt, title, open, minimized, busy, onOpenCh
               onKeyDown={onKey}
               placeholder={busy ? "working…" : "ask intent or execute command…"}
             />
+            {/* Draft hypotheses button (§8.2) */}
+            <button
+              type="button"
+              className="draft-hypotheses-btn"
+              disabled={!selectedTenet || busy}
+              onClick={() => {
+                const raw = command.trim();
+                onSubmit(raw ? `/hypothesize ${raw}` : "/hypothesize");
+                setCommand("");
+              }}
+              title={selectedTenet ? `Draft hypotheses for ${selectedTenet.name}` : "Select a tenet in the Tenets view first"}
+            >
+              Draft hypotheses
+            </button>
             <button type="submit" aria-label="Run command" disabled={busy}>
               ↵
             </button>

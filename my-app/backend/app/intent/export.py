@@ -21,7 +21,7 @@ def _slug(name: str) -> str:
 
 
 def render_folder(store: IntentStore) -> Dict[str, str]:
-    files: Dict[str, str] = {".gitignore": "results/\n"}
+    files: Dict[str, str] = {".gitignore": "results/\n.generation/\n.sessions/\n.queries/\n"}
     tenets = store.tenets()
 
     def folder(tid: str) -> str:

@@ -5,6 +5,7 @@ session cookie; agents send "Authorization: Bearer <key>" (see AGENT_KEYS).
 """
 import posixpath
 from typing import List, Optional
+from pydantic import BaseModel
 
 from fastapi import APIRouter, Depends, HTTPException, Response, WebSocket, WebSocketDisconnect
 
@@ -363,6 +364,82 @@ async def run_pipeline(wa=WA) -> dict:
         head_sha=head,
         base_sha=ws.last_synced_sha,
     )
+
+
+# ---------------------------------------------------------------- Two-Mode Terminal Endpoints
+
+class WorkspaceQueryBody(BaseModel):
+    message: str
+    selected_tenet_id: Optional[str] = None
+    session_id: Optional[str] = None
+
+
+@router.post("/query")
+async def workspace_query(body: WorkspaceQueryBody, wa=WA) -> dict:
+    """Runs the router-less query path (same as /ask) and returns the query block."""
+    store, actor, ws = _store(wa)
+    from intentflow import triggers
+    from app.chat_router import WorkspaceContext
+
+    ws_ctx = WorkspaceContext(ws.id)
+    res = await triggers.trigger_query(
+        workspace=ws_ctx,
+        user_id=actor.name,
+        message=body.message,
+        selected_tenet_id=body.selected_tenet_id,
+        route=None,
+    )
+    return {"query": res.model_dump()}
+
+
+class HypothesisGenerateBody(BaseModel):
+    tenet_id: str
+    count: Optional[int] = None
+    focus: Optional[str] = None
+
+
+@router.post("/hypotheses/generate")
+async def generate_hypotheses_endpoint(body: HypothesisGenerateBody, wa=WA) -> dict:
+    """Explicit hypothesis generation for the selected tenet (§7)."""
+    store, actor, ws = _store(wa)
+    from intentflow import triggers
+    from intentflow.models import JevDecision, PromptVerdict, new_id
+    from app.chat_router import WorkspaceContext
+
+    tenets = store.tenets()
+    if body.tenet_id not in tenets:
+        raise HTTPException(404, f"Tenet {body.tenet_id} not found")
+
+    decision = JevDecision(
+        decision_id=new_id("jd"),
+        verdict=PromptVerdict.HYPOTHESIS_GENERATION,
+        confidence=1.0,
+        source="explicit_user",
+        approved=True,
+        target_tenet_id=body.tenet_id,
+        requested_count=body.count or 3,
+        focus=body.focus,
+    )
+    ws_ctx = WorkspaceContext(ws.id)
+    gen_res = await triggers.trigger_hypothesis_generation(
+        workspace=ws_ctx,
+        user_id=actor.name,
+        decision=decision,
+    )
+    return gen_res.model_dump()
+
+
+@router.get("/jev/prompt-decisions")
+def get_prompt_decisions(wa=WA) -> List[dict]:
+    """Returns past Jev prompt decisions from changelog (non-query only)."""
+    store, _, _ = _store(wa)
+    entries = store.read_changelog(limit=200)
+    decisions = []
+    for e in entries:
+        if e.get("action") == "jev.prompt_decision" and e.get("decision"):
+            decisions.append(e["decision"])
+    return decisions
+
 
 
 # ---------------------------------------------------------------- live updates

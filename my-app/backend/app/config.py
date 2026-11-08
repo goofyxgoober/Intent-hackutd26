@@ -40,5 +40,27 @@ class Settings:
     state_cookie: str = "intentflow_oauth_state"
     session_ttl_seconds: int = 60 * 60 * 24 * 7
 
+    # Two-Mode Terminal and Query Engine settings
+    query_planner_max_files: int = int(os.getenv("QUERY_PLANNER_MAX_FILES", "8"))
+    query_max_rounds: int = int(os.getenv("QUERY_MAX_ROUNDS", "2"))
+    query_outline_token_budget: int = int(os.getenv("QUERY_OUTLINE_TOKEN_BUDGET", "3000"))
+    query_context_token_budget: int = int(os.getenv("QUERY_CONTEXT_TOKEN_BUDGET", "10000"))
+    query_source_max_lines_per_file: int = int(os.getenv("QUERY_SOURCE_MAX_LINES_PER_FILE", "120"))
+    query_source_max_total_lines: int = int(os.getenv("QUERY_SOURCE_MAX_TOTAL_LINES", "400"))
+    query_answer_provider: str = os.getenv("QUERY_ANSWER_PROVIDER", "nemotron")
+    query_fallback_to_gemini: bool = _bool("QUERY_FALLBACK_TO_GEMINI", "true")
+    chat_generation_timeout_seconds: int = int(os.getenv("CHAT_GENERATION_TIMEOUT_SECONDS", "120"))
+    nemotron_tier_query_answer: str = os.getenv("NEMOTRON_TIER_QUERY_ANSWER", "fast")
+
+    # Jev Decision & Hypothesis Generation Settings
+    jev_prompt_min_confidence: float = float(os.getenv("JEV_PROMPT_MIN_CONFIDENCE", "0.75"))
+    jev_decision_ttl_seconds: int = int(os.getenv("JEV_DECISION_TTL_SECONDS", "300"))
+    hypothesis_per_tenet_cap: int = int(os.getenv("HYPOTHESIS_PER_TENET_CAP", "10"))
+    hypothesis_rate_limit_per_minute: int = int(os.getenv("HYPOTHESIS_RATE_LIMIT_PER_MINUTE", "10"))
+    nemotron_tier_jev_prompt: str = os.getenv("NEMOTRON_TIER_JEV_PROMPT", "fast")
+    nemotron_tier_generator: str = os.getenv("NEMOTRON_TIER_GENERATOR", "deep")
+    nemotron_tier_verifier: str = os.getenv("NEMOTRON_TIER_VERIFIER", "fast")
+
+
 
 settings = Settings()

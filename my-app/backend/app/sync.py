@@ -288,6 +288,8 @@ async def _process(workspace_id: int, source: str, token: Optional[str], head: O
 
         batch = _save_batch(workspace_id, None, head, source, "ingested", data, event_ids)
         events.emit(workspace_id, "sync.batch", batch=batch)
+        from .intent.retrieval import invalidate_outline_cache
+        invalidate_outline_cache(workspace_id)
         return batch
 
     cmp = await compare_refs(token, full_name, base, head)
@@ -336,6 +338,8 @@ async def _process(workspace_id: int, source: str, token: Optional[str], head: O
     status = "skipped" if pure_rename else "awaiting_review"
     batch = _save_batch(workspace_id, base, head, source, status, data, event_ids)
     events.emit(workspace_id, "sync.batch", batch={k: v for k, v in batch.items() if k != "files"})
+    from .intent.retrieval import invalidate_outline_cache
+    invalidate_outline_cache(workspace_id)
     poll_state.setdefault(workspace_id, {})["last_change_at"] = batch["created_at"]
     return batch
 

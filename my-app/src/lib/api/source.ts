@@ -20,6 +20,9 @@ export interface GeneratedTests {
 
 export interface AgentReply {
   answer: string;
+  route?: Record<string, unknown>;
+  generation?: Record<string, unknown>;
+  query?: Record<string, unknown>;
 }
 
 /** Everything the dashboard needs from the backend. */

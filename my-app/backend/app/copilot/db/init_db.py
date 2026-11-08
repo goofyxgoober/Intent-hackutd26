@@ -8,6 +8,12 @@ from app.copilot.db.meta_db import MetaBase, MetaSession, meta_engine
 def init_db() -> None:
     MetaBase.metadata.create_all(meta_engine)
     MessageBase.metadata.create_all(message_engine)
+    try:
+        with message_engine.connect() as conn:
+            conn.execute(__import__("sqlalchemy").text("ALTER TABLE messages ADD COLUMN meta_json JSON"))
+            conn.commit()
+    except Exception:
+        pass
     _seed_dev_data()
 
 

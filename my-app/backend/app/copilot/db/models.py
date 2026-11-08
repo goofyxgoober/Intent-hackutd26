@@ -72,3 +72,4 @@ class Message(MessageBase):
     token_metrics: Mapped[dict | None] = mapped_column(JSON, nullable=True)
     retrieved_items: Mapped[list | None] = mapped_column(JSON, nullable=True)
     agent_steps: Mapped[list | None] = mapped_column(JSON, nullable=True)
+    meta_json: Mapped[dict | None] = mapped_column(JSON, nullable=True)
