@@ -11,6 +11,7 @@ import { focusFromIds, focusFromResult, type Focus } from "@/lib/focus";
 import { useTenetTree } from "@/hooks/useTenetTree";
 import { graphNodesFor, tenetsForNode } from "@/lib/tenetLinks";
 import type { RetrievalOptions } from "@/lib/retrieval/engine";
+import { FIT, FIT_WIDE } from "@/lib/graph/layout";
 import { execute, type CommandContext, type Line, type Tone } from "@/lib/terminal/commands";
 import { GraphCanvas } from "@/components/graph/GraphCanvas";
 import { Inspector } from "@/components/Inspector";
@@ -26,7 +27,6 @@ type View = "graph" | "tenets";
 // Client-only module (loaded with ssr:false), so window/location are safe here.
 const config = getConfig();
 const source = createSource(config);
-const STAGES = ["Raw AST", "Intent graph", "Modern merge"];
 
 const VIEWS: { id: View; label: string; hint: string }[] = [
   { id: "graph", label: "Codebase", hint: "What the code does" },
@@ -83,31 +83,26 @@ function Toolbar({
   syncing,
   onExport,
   exporting,
-  view,
 }: {
   onSync(): void;
   syncing: boolean;
   onExport(): void;
   exporting: boolean;
-  view: View;
 }) {
   const { zoom } = useViewport();
   const { zoomIn, zoomOut, fitView } = useReactFlow();
   const me = useMe();
   return (
     <div className="toolbar">
-      <span className="tb-hint" aria-hidden>
-        <kbd>click</kbd> {view === "graph" ? "a codebase node" : "a tenet"} <kbd>/</kbd> ask <kbd>esc</kbd> clear
-      </span>
       <div className="tb-group" role="group" aria-label="Zoom">
         <button onClick={() => zoomOut({ duration: 150 })} aria-label="Zoom out"><Svg d="minus" /></button>
-        <button className="tb-zoom" onClick={() => fitView({ padding: 0.12, duration: 300 })} title="Fit graph to screen">
+        <button className="tb-zoom" onClick={() => fitView(FIT_WIDE)} title="Fit graph to screen">
           {Math.round(zoom * 100)}%
         </button>
         <button onClick={() => zoomIn({ duration: 150 })} aria-label="Zoom in"><Svg d="plus" /></button>
       </div>
       <Guide />
-      <a className="tb-ghost" href="/dashboard" title="GitHub repos, sync and history"><Svg d="git" /> Repos</a>
+      <a className="tb-ghost" href="/dashboard" title="GitHub repos, sync and history"><Svg d="git" /><span>Repos</span></a>
       {me === null && source.kind === "http" ? (
         <a className="tb-ghost" href="/login">Sign in</a>
       ) : me ? (
@@ -119,12 +114,12 @@ function Toolbar({
         className="tb-ghost"
         onClick={onExport}
         disabled={exporting || syncing}
-        title="Export intent files (.intentflow) to GitHub repo"
+        title="Export intent files (.intentflow) to the GitHub repo"
       >
-        <Svg d="upload" spin={exporting} /> {exporting ? "Exporting…" : "Export intent"}
+        <Svg d="upload" spin={exporting} /><span>{exporting ? "Exporting…" : "Export"}</span>
       </button>
       <button className={`tb-primary ${syncing ? "syncing" : ""}`} onClick={onSync} disabled={syncing}>
-        <Svg d="sync" spin={syncing} /> {syncing ? "Syncing" : "Sync repo"}
+        <Svg d="sync" spin={syncing} /><span>{syncing ? "Syncing…" : "Sync"}</span>
       </button>
     </div>
   );
@@ -140,43 +135,34 @@ function StatusBar({ g, focus, view, tenets }: { g: IntentGraphState; focus: Foc
     return { n: t.length, a: t.reduce((x, y) => x + (y.is_leaf ? y.axioms : 0), 0), h: t.reduce((x, y) => x + (y.is_leaf ? y.hypotheses : 0), 0), f: t.reduce((x, y) => x + y.flagged_axioms, 0) };
   }, [tenets.tree]);
   const link =
-    source.kind === "mock" ? "fixture (offline)" : g.connection === "live" ? "live" : g.connection === "connecting" ? "connecting…" : "offline";
+    source.kind === "mock" ? "Offline sample data" : g.connection === "live" ? "Live" : g.connection === "connecting" ? "Connecting…" : "Offline";
 
   return (
     <footer className="statusbar">
       <div>
         <span>
-          source: <b>{source.label}</b>
+          <b>{source.label}</b>
         </span>
-        <i>·</i>
         <span>
-          graph: <b>{g.index ? `${g.index.nodes.size} nodes · ${g.index.edges.length} edges` : "—"}</b>
+          {g.index ? `${g.index.nodes.size} nodes · ${g.index.edges.length} edges · ${boundaries} ${boundaries === 1 ? "area" : "areas"}` : "No graph loaded"}
         </span>
-        <i>·</i>
-        <span className={g.status === "syncing" || g.connection === "connecting" ? "pulse" : ""}>
-          stream: <b>{g.status === "syncing" ? "ingesting…" : link}</b>
-        </span>
-        {view === "tenets" ? (
-          <>
-            <i>·</i>
-            <span>
-              tenets: <b>{tenets.tree ? `${ts.n} · ${ts.a}A · ${ts.h}H${ts.f ? ` · ⚑${ts.f}` : ""}` : "—"}</b>
-            </span>
-            <i>·</i>
-            <span>
-              intent api: <b>{tenets.offline ? "fixture (offline)" : tenets.live ? "live" : tenets.status}</b>
-            </span>
-          </>
+        {view === "tenets" && tenets.tree ? (
+          <span>
+            {ts.n} tenets · {ts.a} locked · {ts.h} proposed{ts.f ? ` · ${ts.f} flagged` : ""}
+          </span>
         ) : null}
+        <span className={`conn ${g.status === "syncing" || g.connection === "connecting" ? "pulse" : g.connection === "live" ? "on" : ""}`}>
+          {g.status === "syncing" ? "Ingesting…" : link}
+        </span>
       </div>
       <p>
-        {view === "tenets" ? (
-          tenets.tree ? `“${ts.n} tenets · ${ts.a} axioms locked · ${ts.h} hypotheses open”` : tenets.status === "signin" ? "“sign in to load the tenet hierarchy”" : "“reading the tenet tree…”"
-        ) : g.index
-          ? `“${g.index.repo}: ${g.index.nodes.size} codebase nodes across ${boundaries} boundaries”`
-          : g.status === "error"
-            ? "“graph unavailable”"
-            : "“distilling ast…”"}
+        {view === "tenets"
+          ? tenets.tree
+            ? `${ts.n} tenets · ${ts.a} axioms locked · ${ts.h} hypotheses open`
+            : tenets.status === "signin" ? "sign in to load the tenet hierarchy" : "reading the tenet tree…"
+          : g.index
+            ? `${g.index.repo}: ${g.index.nodes.size} nodes across ${boundaries} ${boundaries === 1 ? "area" : "areas"}`
+            : g.status === "error" ? "graph unavailable" : "reading the code…"}
         {view === "graph" && focus && g.index ? <TokenMeter index={g.index} focus={focus} /> : null}
       </p>
     </footer>
@@ -195,7 +181,7 @@ function Workspace() {
   const tenets = useTenetTree(source, config.repo, true);
   // a claim that was scrapped away or removed by a sync simply closes
   const openClaimId = claimId && tenets.tree?.claims[claimId] ? claimId : null;
-  const [termOpen, setTermOpen] = useState(true);
+  const [termOpen, setTermOpen] = useState(() => window.innerWidth > 900);
   const [termMin, setTermMin] = useState(false);
   const [busy, setBusy] = useState(false);
   const [lines, setLines] = useState<Line[]>(() => [
@@ -442,7 +428,7 @@ function Workspace() {
         },
         wsApi: tenets.wsApi,
         updateTree: tenets.updateTree,
-        fit: () => fitView({ padding: 0.12, duration: 300 }),
+        fit: () => fitView(FIT),
       };
       setBusy(true);
       try {
@@ -509,20 +495,11 @@ function Workspace() {
     <main className="workspace">
       <header className="legend">
         <ViewSwitch view={view} onChange={setView} />
-        <ol className="journey" aria-label="Modernization pipeline">
-          {STAGES.map((label, i) => (
-            <li key={label} className={g.stage > i ? "done" : g.stage === i ? "active" : ""} aria-current={g.stage === i ? "step" : undefined}>
-              <i aria-hidden>{g.stage > i ? "✓" : i + 1}</i>
-              <span>{label}</span>
-            </li>
-          ))}
-        </ol>
         <Toolbar
           onSync={() => run("sync")}
           syncing={syncing}
           onExport={onExport}
           exporting={exporting}
-          view={view}
         />
       </header>
 
@@ -541,28 +518,27 @@ function Workspace() {
             />
           ) : (
             <div className="graph-empty">
-              <img src="/assets/94db2.svg" alt="" />
-              {tenets.status === "signin" ? (
+                {tenets.status === "signin" ? (
                 <>
-                  <i className="chalk-note">sign in to read the tenet hierarchy</i>
-                  <a className="empty-link" href="/login">sign in with github</a>
+                  <i className="empty-title">Sign in to read the tenet hierarchy</i>
+                  <a className="empty-link" href="/login">Sign in with GitHub</a>
                 </>
               ) : tenets.status === "unlinked" ? (
                 <>
-                  <i className="chalk-note">{config.repo} isn&apos;t connected to a workspace yet</i>
-                  <a className="empty-link" href="/dashboard">connect a github repo</a>
-                  <code>or open ?repo=owner/name</code>
+                  <i className="empty-title">{config.repo} isn&apos;t connected to a workspace yet</i>
+                  <a className="empty-link" href="/dashboard">Connect a GitHub repo</a>
+                  <code>or open this page with ?repo=owner/name</code>
                 </>
               ) : tenets.status === "error" ? (
                 <>
-                  <i className="chalk-note">couldn&apos;t reach the intent engine</i>
+                  <i className="empty-title">Couldn&apos;t reach the intent engine</i>
                   <code>{tenets.error}</code>
-                  <button onClick={() => void tenets.reload()}>retry</button>
+                  <button onClick={() => void tenets.reload()}>Retry</button>
                 </>
               ) : tenets.status === "ready" ? (
-                <i className="chalk-note">no tenets yet: the intent builder drafts the root from the code</i>
+                <i className="empty-title">No tenets yet. The intent builder drafts the root from the code.</i>
               ) : (
-                <i className="chalk-note">reading the tenet tree…</i>
+                <i className="empty-title">Reading the tenet tree…</i>
               )}
             </div>
           )
@@ -580,31 +556,30 @@ function Workspace() {
           />
         ) : (
           <div className="graph-empty">
-            <img src="/assets/94db2.svg" alt="" />
             {g.status === "error" && /^401/.test(g.error ?? "") ? (
               <>
-                <i className="chalk-note">sign in to read {config.repo}</i>
-                <a className="empty-link" href="/login">sign in with github</a>
+                <i className="empty-title">Sign in to read {config.repo}</i>
+                <a className="empty-link" href="/login">Sign in with GitHub</a>
               </>
             ) : g.status === "error" && /^404/.test(g.error ?? "") ? (
               <>
-                <i className="chalk-note">{config.repo} isn&apos;t connected yet</i>
-                <a className="empty-link" href="/dashboard">connect a github repo</a>
+                <i className="empty-title">{config.repo} isn&apos;t connected yet</i>
+                <a className="empty-link" href="/dashboard">Connect a GitHub repo</a>
               </>
             ) : g.status === "error" ? (
               <>
-                <i className="chalk-note">couldn&apos;t reach the intent graph</i>
+                <i className="empty-title">Couldn&apos;t reach the intent graph</i>
                 <code>{g.error}</code>
-                <button onClick={() => g.sync()}>retry</button>
+                <button onClick={() => g.sync()}>Retry</button>
               </>
             ) : g.index ? (
               <>
-                <i className="chalk-note">{config.repo} hasn&apos;t been read yet</i>
-                <code>pull the code, map the imports, draft the first tenets</code>
-                <button onClick={() => void run("sync")} disabled={syncing}>{syncing ? "reading the code…" : "read this repo"}</button>
+                <i className="empty-title">{config.repo} hasn&apos;t been analyzed yet</i>
+                <code>Pull the code, map the imports and draft the first tenets.</code>
+                <button onClick={() => void run("sync")} disabled={syncing}>{syncing ? "Reading the code…" : "Analyze this repo"}</button>
               </>
             ) : (
-              <i className="chalk-note">untangling {config.repo}…</i>
+              <i className="empty-title">Loading {config.repo}…</i>
             )}
           </div>
         )}

@@ -9,7 +9,7 @@
   --line: #5b6478;
   --text: #e4e6eb;
   --dim: #7d8496;
-  --purple: #b57cff;
+  --purple: #b76df0;
   --green: #4ade80;
   --red: #f87171;
   --mono: "JetBrains Mono", ui-monospace, SFMono-Regular, Menlo, monospace;
@@ -268,11 +268,11 @@ a.chip:hover{ color: var(--text); }
 .chip-mini{ font-size: 10px; padding: 1px 6px; border: 1px solid var(--border); border-radius: 3px; white-space: nowrap; }
 .chip-mini.warn{ color: var(--amber); border-color: rgba(245, 185, 74, 0.4); }
 .chip-mini.red{ color: var(--red); border-color: rgba(248, 113, 113, 0.4); }
-.chip-mini.purple{ color: var(--purple); border-color: rgba(181, 124, 255, 0.4); }
+.chip-mini.purple{ color: var(--purple); border-color: rgba(183, 109, 240, 0.4); }
 .chip-mini.dim{ color: var(--dim); }
 .claim-group{ font-size: 11px; font-weight: 400; color: var(--dim); letter-spacing: 0.08em; text-transform: uppercase; margin: 18px 0 8px; }
 .claim{ border: 1px solid var(--border); border-radius: 3px; padding: 12px; margin-bottom: 10px; background: var(--surface-2); }
-.claim.axiom{ border-color: rgba(181, 124, 255, 0.35); }
+.claim.axiom{ border-color: rgba(183, 109, 240, 0.35); }
 .claim.flagged{ border-color: rgba(248, 113, 113, 0.5); }
 .claim-head{ display: flex; align-items: center; gap: 8px; flex-wrap: wrap; }
 .claim-head .verdict{ margin-left: auto; min-width: 0; }

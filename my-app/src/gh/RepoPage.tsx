@@ -4,7 +4,7 @@ import { useCallback, useEffect, useMemo, useRef, useState } from "react";
 import Link from "next/link";
 import { api, type Changes, type PollStatus } from "./api";
 import { useAuth } from "./AuthContext";
-import { Stages, StatusBar, Terminal, TopBar } from "./Chrome";
+import { Panel, TopBar } from "./Chrome";
 import { IntentPanel } from "./IntentPanel";
 import { RepoPanel, type RepoTab } from "./RepoPanel";
 import { workspaceApi, type TreeView } from "./intentApi";
@@ -55,13 +55,13 @@ export default function RepoPage({ owner, repo }: { owner: string; repo: string 
         setWorkspaceId(ws.id);
         setChanges(await api<Changes>(`${base}/changes`));
       } catch (e) {
-        say(`✗ ${(e as Error).message}`, "red");
+        say(`Failed: ${(e as Error).message}`, "red");
       }
     })();
   }, [base, say]);
 
   useEffect(() => {
-    loadTree().catch((e: Error) => say(`✗ ${e.message}`, "red"));
+    loadTree().catch((e: Error) => say(`Failed: ${e.message}`, "red"));
   }, [loadTree, say]);
 
   // Agents (and other tabs) change the tree; refresh on their events.
@@ -73,7 +73,7 @@ export default function RepoPage({ owner, repo }: { owner: string; repo: string 
         const affected = b.affected_tenets.length ? ` · ${b.affected_tenets.length} tenets affected` : "";
         say(
           b.initial
-            ? `✓ repo ingested automatically (${b.file_count ?? 0} files at ${b.head.slice(0, 7)})`
+            ? `Repo ingested automatically (${b.file_count ?? 0} files at ${b.head.slice(0, 7)})`
             : `⇣ new commits on GitHub · now at ${b.head.slice(0, 7)}${affected}`,
           "green",
         );
@@ -88,21 +88,21 @@ export default function RepoPage({ owner, repo }: { owner: string; repo: string 
 
   async function sync() {
     setBusy(true);
-    say(`${user!.login}@intentflow:~$ sync ${owner}/${repo}`);
+    say(`Syncing ${owner}/${repo}…`);
     try {
       const r = await api<Changes>(`${base}/sync`, { method: "POST" });
-      if (r.status === "up_to_date") say("✓ already up to date.", "green");
-      else if (r.initial) say(`✓ ingested ${r.file_count ?? 0} files at ${r.head.slice(0, 7)}. baseline set.`, "green");
+      if (r.status === "up_to_date") say("Already up to date.", "green");
+      else if (r.initial) say(`Ingested ${r.file_count ?? 0} files at ${r.head.slice(0, 7)}. baseline set.`, "green");
       else
         say(
-          `✓ ${r.files.length} files changed · ${r.affected_tenets.length} tenets affected · ${r.rerun_claims.length} claims to re-test`,
+          `${r.files.length} files changed · ${r.affected_tenets.length} tenets affected · ${r.rerun_claims.length} claims to re-test`,
           "green",
         );
       setChanges({ ...r, synced: true });
       setTab("changes");
       await Promise.all([loadTree(), loadLatest()]);
     } catch (e) {
-      say(`✗ ${(e as Error).message}`, "red");
+      say(`Failed: ${(e as Error).message}`, "red");
     } finally {
       setBusy(false);
     }
@@ -111,12 +111,12 @@ export default function RepoPage({ owner, repo }: { owner: string; repo: string 
   async function exportFolder() {
     if (!wsApi) return;
     setBusy(true);
-    say(`${user!.login}@intentflow:~$ export intent folder`);
+    say("Exporting intent folder…");
     try {
       const r = await wsApi.exportFolder();
-      say(r.changed ? `✓ committed ${r.files} files to ${r.branch} (${r.commit_sha.slice(0, 7)})` : "✓ nothing changed since the last export", "green");
+      say(r.changed ? `Committed ${r.files} files to ${r.branch} (${r.commit_sha.slice(0, 7)})` : "Nothing changed since the last export", "green");
     } catch (e) {
-      say(`✗ ${(e as Error).message}`, "red");
+      say(`Failed: ${(e as Error).message}`, "red");
     } finally {
       setBusy(false);
     }
@@ -135,25 +135,25 @@ export default function RepoPage({ owner, repo }: { owner: string; repo: string 
               {user!.login}
             </span>
             <button className="btn" onClick={logout}>
-              sign out
+              Sign out
             </button>
           </>
         }
       />
       <div className="subbar">
-        <Stages active={2} />
+        <h1 className="page-title">{owner}/{repo}</h1>
         <div className="chips">
           <Link className="chip" href="/dashboard">
-            ← repos
+            ← Repos
           </Link>
           <Link className="chip" href={`/?repo=${encodeURIComponent(`${owner}/${repo}`)}`}>
-            graph view →
+            Graph view →
           </Link>
           <button className="btn" onClick={sync} disabled={busy}>
-            sync repo
+            Sync repo
           </button>
           <button className="btn" onClick={exportFolder} disabled={busy || !wsApi}>
-            export intent
+            Export intent
           </button>
         </div>
       </div>
@@ -167,25 +167,21 @@ export default function RepoPage({ owner, repo }: { owner: string; repo: string 
           {wsApi && <IntentPanel tree={tree} wsApi={wsApi} say={say} onChanged={() => loadTree()} />}
         </section>
 
-        <Terminal className="dash-terminal">
-          <div className="line">
-            <span className="purple">⚡ TARGET →</span> {owner}/{repo} ·{" "}
-            <span className="purple">{tree?.tenets.length ?? 0} tenets</span>
-          </div>
+        <Panel title="Activity" className="dash-terminal">
           <div className="line dim">
-            axioms → {axioms} · hypotheses → {hypotheses} · live → <span className={live ? "green" : "red"}>{live ? "on" : "off"}</span>
+            {tree?.tenets.length ?? 0} tenets · {axioms} locked · {hypotheses} proposed · live updates{" "}
+            <span className={live ? "green" : "red"}>{live ? "on" : "off"}</span>
           </div>
           <div className="gap" />
-          {log.length === 0 && <div className="line dim">└ sync to ingest the repo; agents' changes appear here live.</div>}
+          {log.length === 0 && <div className="line dim">Sync to ingest the repo. Changes from agents appear here as they happen.</div>}
           {log.map((l, i) => (
             <div key={i} className={`line ${l.tone ?? ""}`}>
-              {l.text.includes("@intentflow:~$") ? <span className="purple">{l.text}</span> : l.text}
+              {l.text}
             </div>
           ))}
-        </Terminal>
+        </Panel>
       </main>
 
-      <StatusBar sync="Ayaan OAuth webhook" />
     </div>
   );
 }

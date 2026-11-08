@@ -17,15 +17,15 @@ export const TenetCard = memo(function TenetCard({ data, selected }: NodeProps<T
       <Handle type="target" position={Position.Top} isConnectable={false} />
       <span className="node-head">
         <strong>{t.name}</strong>
-        <small>{t.level === 0 ? "root" : t.is_leaf ? "leaf" : `L${t.level}`}</small>
-      </span>
-      <em>{t.functionality || "no functionality statement yet"}</em>
+        </span>
+      <small className="node-source">{t.level === 0 ? "Root" : t.is_leaf ? "Leaf" : `Level ${t.level}`}</small>
+      <em>{t.functionality || "No functionality statement yet."}</em>
       <span className="tenet-meta">
-        <span className="ax" title="Axioms: locked, human-confirmed rules">◆ {t.axioms} locked</span>
-        <span className="hy" title="Hypotheses: proposed rules, still editable">◇ {t.hypotheses} proposed</span>
-        {t.flagged_axioms > 0 ? <span className="flag">⚑ {t.flagged_axioms}</span> : null}
-        {t.proposed ? <span className="warn">proposed</span> : null}
-        {t.references.length ? <span>↗ {t.references.length}</span> : null}
+        <span className="ax" title="Axioms: locked, human-confirmed rules">{t.axioms} locked</span>
+        <span className="hy" title="Hypotheses: proposed rules, still editable">{t.hypotheses} proposed</span>
+        {t.flagged_axioms > 0 ? <span className="flag">{t.flagged_axioms} flagged</span> : null}
+        {t.proposed ? <span className="warn">new</span> : null}
+        {t.references.length ? <span>{t.references.length} ref{t.references.length === 1 ? "" : "s"}</span> : null}
         <span className={`verdict ${t.rollup}`}>{t.rollup}</span>
       </span>
       {t.code_links[0] ? <span className="infra-note">{t.code_links[0].path}{t.code_links.length > 1 ? ` +${t.code_links.length - 1}` : ""}</span> : null}

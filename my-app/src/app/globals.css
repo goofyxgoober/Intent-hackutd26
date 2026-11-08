@@ -1,10 +1,4 @@
 @import "tailwindcss";
-@font-face{
-  font-family: "Caveat:Regular";
-  src: url("https://static.figma.com/font/Caveat_wght__1") format("woff2");
-  font-style: normal;
-  font-weight: 400;
-}
 :root{
   color: var(--ink-2);
   background: var(--slate-0);
@@ -56,9 +50,7 @@
   gap: 18px;
   color: var(--ink-3);
   font:
-    400 19px/1 "Caveat:Regular",
-    "Caveat",
-    cursive;
+    400 19px/1 var(--font-ui);
   white-space: nowrap;
 }
 .journey .stage{
@@ -110,9 +102,7 @@
 }
 .chalk-note{
   font:
-    400 14px/1.2 "Caveat:Regular",
-    "Caveat",
-    cursive;
+    400 14px/1.2 var(--font-ui);
   color: var(--ink-4);
   white-space: nowrap;
 }
@@ -167,9 +157,7 @@
 .node-card em{
   color: var(--ink-3);
   font:
-    400 16px/20px "Caveat:Regular",
-    "Caveat",
-    cursive;
+    400 16px/20px var(--font-ui);
 }
 .node-card ul{
   padding: 8px 0 0;
@@ -212,9 +200,7 @@
   padding-top: 3px;
   color: var(--ink-3);
   font:
-    400 13px/17px "Caveat:Regular",
-    "Caveat",
-    cursive;
+    400 13px/17px var(--font-ui);
 }
 .inspector{
   position: absolute;
@@ -251,9 +237,7 @@
   margin: 8px 24px 4px 0;
   color: white;
   font:
-    400 25px/1.1 "Caveat:Regular",
-    "Caveat",
-    cursive;
+    400 25px/1.1 var(--font-ui);
 }
 .inspector > code{
   color: var(--ink-3);
@@ -505,9 +489,7 @@
 }
 .statusbar p{
   font:
-    400 14px/1 "Caveat:Regular",
-    "Caveat",
-    cursive;
+    400 14px/1 var(--font-ui);
   white-space: nowrap;
 }
 .statusbar p b{

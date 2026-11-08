@@ -34,16 +34,16 @@ export function Terminal({ lines, prompt, title, open, minimized, busy, onOpenCh
     const el = rootRef.current;
     if (!el) return;
     const p = pos.current;
-    const rot = Math.max(-2.5, Math.min(2.5, p.vx * 0.15));
-    const stretch = Math.min(0.02, Math.hypot(p.vx, p.vy) * 0.0015);
+    const rot = Math.max(-0.7, Math.min(0.7, p.vx * 0.04));
+    const stretch = Math.min(0.005, Math.hypot(p.vx, p.vy) * 0.0004);
     el.style.transform = `translate3d(${p.x}px, ${p.y}px, 0) rotate(${rot}deg) scale(${1 + stretch}, ${1 - stretch})`;
   }
 
   function step() {
     const t = target.current;
     const p = pos.current;
-    p.vx = (p.vx + (t.x - p.x) * 0.18) * 0.8; // spring with damping < 1 => overshoot / jiggle
-    p.vy = (p.vy + (t.y - p.y) * 0.18) * 0.8;
+    p.vx = (p.vx + (t.x - p.x) * 0.2) * 0.72; // spring with damping < 1 => overshoot / jiggle
+    p.vy = (p.vy + (t.y - p.y) * 0.2) * 0.72;
     p.x += p.vx;
     p.y += p.vy;
     const rest = Math.abs(t.x - p.x) < 0.05 && Math.abs(t.y - p.y) < 0.05 && Math.abs(p.vx) < 0.05 && Math.abs(p.vy) < 0.05;

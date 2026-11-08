@@ -3,7 +3,7 @@
 import { useEffect, useState } from "react";
 import Link from "next/link";
 import { useAuth } from "./AuthContext";
-import { NodeCard, PROMPT, Stages, StatusBar, Terminal, TopBar } from "./Chrome";
+import { NodeCard, TopBar } from "./Chrome";
 
 interface Repo {
   id: number;
@@ -42,26 +42,24 @@ export default function DashboardPage() {
               {login}
             </span>
             <button className="btn" onClick={logout}>
-              sign out
+              Sign out
             </button>
           </>
         }
       />
       <div className="subbar">
-        <Stages active={1} />
-        <div className="chips">
-          <span className="chip">select a repo to sync</span>
-        </div>
+        <h1 className="page-title">Repositories</h1>
+        <p className="page-sub">Choose a repository to open its graph, sync it or review its history.</p>
       </div>
 
       <main className="canvas dash-canvas">
         <section className="repo-grid">
           {error && (
-            <NodeCard name="sync_error" tag="github" summary="Couldn't list repositories.">
+            <NodeCard name="Couldn't list repositories" tag="GitHub">
               <div className="mono-list red">{error}</div>
             </NodeCard>
           )}
-          {!repos && !error && <p className="hand dim loading">fetching repositories…</p>}
+          {!repos && !error && <p className="dim loading">Loading repositories…</p>}
           {repos?.map((r) => (
             <NodeCard
               key={r.id}
@@ -71,49 +69,22 @@ export default function DashboardPage() {
               className="repo-node"
             >
               <div className="mono-list">
-                <div>owner: {r.full_name.split("/")[0]}</div>
-                <div>lang: {r.language ?? "—"}</div>
-                <div>branch: {r.default_branch}</div>
+                <div>{r.full_name.split("/")[0]}</div>
+                <div>{r.language ?? "No language"} · {r.default_branch}</div>
               </div>
-              <Link className="link-purple" href={`/?repo=${encodeURIComponent(r.full_name)}`}>
-                [open graph]
-              </Link>{" "}
-              <Link className="link-purple" href={`/repos/${r.full_name}`}>
-                [sync &amp; history]
-              </Link>
+              <div className="card-actions">
+                <Link className="link-purple" href={`/?repo=${encodeURIComponent(r.full_name)}`}>
+                  Open graph
+                </Link>
+                <Link className="link-purple" href={`/repos/${r.full_name}`}>
+                  Sync &amp; history
+                </Link>
+              </div>
             </NodeCard>
           ))}
         </section>
-
-        <Terminal
-          className="dash-terminal"
-          footer={
-            <div className="cta static">
-              <span className="prompt">{PROMPT.replace("ayaan", login)}</span>
-              <span className="cta-input placeholder">ask intent or execute command…</span>
-              <span className="enter">↵</span>
-            </div>
-          }
-        >
-          <div className="line">
-            <span className="purple">⚡ DISTRO →</span> Arch Linux x86_64 ·{" "}
-            <span className="purple">Nemotron 70B Agentic Core</span>
-          </div>
-          <div className="line dim">
-            GITHUB → <span className="text">{user!.name ?? login}</span> · session active
-          </div>
-          <div className="gap" />
-          <div className="line">
-            <span className="purple">{login}@intentflow:~$</span> repo list
-          </div>
-          <div className="line dim">
-            └ {repos ? `${repos.length} repositories accessible` : "loading…"}
-          </div>
-          <div className="line green">✓ github oauth session verified.</div>
-        </Terminal>
       </main>
 
-      <StatusBar sync="Ayaan OAuth webhook" />
     </div>
   );
 }

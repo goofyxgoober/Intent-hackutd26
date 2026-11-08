@@ -43,15 +43,16 @@
   --ease: cubic-bezier(0.2, 0.7, 0.2, 1);
 
   --font-mono: "JetBrains Mono", "Liberation Mono", ui-monospace, "Courier New", monospace;
-  --font-hand: "Caveat", "Caveat:Regular", "Segoe Print", cursive;
+  --font-ui: "Inter", system-ui, -apple-system, "Segoe UI", sans-serif;
+  --font-hand: "Caveat", "Segoe Print", cursive;
 
-  font-family: var(--font-mono);
-  font-size: 13px;
+  font-family: var(--font-ui);
+  font-size: 14px;
   color-scheme: dark;
 }
 
 html, body { background: var(--slate-0); }
-body { font-family: var(--font-mono); -webkit-font-smoothing: antialiased; text-rendering: optimizeLegibility; }
+body { font-family: var(--font-ui); -webkit-font-smoothing: antialiased; text-rendering: optimizeLegibility; }
 ::selection { background: rgba(183, 109, 240, 0.32); color: var(--ink-hi); }
 
 /* one focus language everywhere: a dashed chalk ring */
@@ -63,37 +64,6 @@ input:focus-visible, textarea:focus-visible { outline-offset: 0; }
 
 /* thin chalk-dust scrollbars */
 * { scrollbar-width: thin; scrollbar-color: var(--slate-4) transparent; }
-
-/* ------------------------------------------------------------ living background */
-.chalkboard-dust {
-  position: fixed;
-  inset: 0;
-  width: 100%;
-  height: 100%;
-  z-index: 0;
-  pointer-events: none;
-}
-/* film-grain over everything: static texture that shivers a few frames per second */
-.chalkboard-grain {
-  position: fixed;
-  inset: -120px;
-  z-index: 60;
-  pointer-events: none;
-  opacity: 0.075;
-  background-image: url("data:image/svg+xml;utf8,<svg xmlns='http://www.w3.org/2000/svg' width='240' height='240'><filter id='n' x='0' y='0' width='100%' height='100%'><feTurbulence type='fractalNoise' baseFrequency='.8' numOctaves='2' stitchTiles='stitch'/><feColorMatrix values='0 0 0 0 .92  0 0 0 0 .91  0 0 0 0 .88  1.5 0 0 0 -.5'/></filter><rect width='100%' height='100%' filter='url(%23n)'/></svg>");
-  animation: grain-shiver 1.1s steps(1) infinite;
-}
-@keyframes grain-shiver {
-  0%   { transform: translate(0, 0); }
-  16%  { transform: translate(-48px, 30px); }
-  33%  { transform: translate(34px, -52px); }
-  50%  { transform: translate(-22px, -18px); }
-  66%  { transform: translate(56px, 40px); }
-  83%  { transform: translate(-40px, 62px); }
-}
-@media (prefers-reduced-motion: reduce) {
-  .chalkboard-grain { animation: none; }
-}
 
 /* =============================================================== WORKSPACE (codebase + axiom) */
 .workspace {
@@ -157,7 +127,7 @@ input:focus-visible, textarea:focus-visible { outline-offset: 0; }
     outline-offset: 4px;
     transform: none;
   }
-  .node-card.hit:not(.selected) { background: #17131f; border: 0; box-shadow: 0 0 0 1px rgba(183, 109, 240, 0.22), 0 10px 24px -14px rgba(0, 0, 0, 0.8); }
+  .node-card.hit:not(.selected) { background: #12141c; border: 0; box-shadow: 0 0 0 1px rgba(183, 109, 240, 0.22), 0 10px 24px -14px rgba(0, 0, 0, 0.8); }
   .node-card.dim { opacity: 0.3; }
 
   .node-head { border: 0; padding: 0; align-items: baseline; min-width: 0; gap: 10px; }
@@ -210,7 +180,7 @@ input:focus-visible, textarea:focus-visible { outline-offset: 0; }
   .node-card.infra em { color: var(--ink-4); font: 11px/1.45 var(--font-mono); -webkit-line-clamp: 2; }
   .infra-note { color: var(--ink-3); font-size: 15px; line-height: 1.2; overflow-wrap: anywhere; display: block; }
 
-  .tenet-card.level-0 { background: #15111d; border: 0; }
+  .tenet-card.level-0 { background: #12141c; border: 0; }
   .tenet-card.leaf { border: 0; }
   .tenet-card.feature .node-head strong { color: var(--chalk-violet-hi); }
   .tenet-meta { gap: 6px 10px; font-size: 10.5px; color: var(--ink-4); min-width: 0; }

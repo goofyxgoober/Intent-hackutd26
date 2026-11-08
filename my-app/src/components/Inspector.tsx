@@ -107,7 +107,7 @@ export function Inspector({ index, nodeId, focus, onSelect, onGenerateTests, ten
       label="Codebase node inspector"
       eyebrow={
         <>
-          <i className="pn-dot" /> codebase node
+          Codebase node
         </>
       }
       title={node.name}
@@ -128,7 +128,7 @@ export function Inspector({ index, nodeId, focus, onSelect, onGenerateTests, ten
           <p className="pn-lead">{node.intent_summary}</p>
           <div className="pn-meta">
             <span className="pn-badge" title="architectural boundary">
-              ⬡ {boundaryOf(node)}
+              {boundaryOf(node)}
             </span>
             <small>{node.node_id}</small>
           </div>

@@ -17,13 +17,13 @@ export interface Insets {
 }
 import type { GraphIndex } from "@/lib/graph/model";
 import { boundaryOf } from "@/lib/graph/model";
-import { estimateSize, layoutGraph } from "@/lib/graph/layout";
+import { FIT, estimateSize, layoutGraph } from "@/lib/graph/layout";
 import type { Focus } from "@/lib/focus";
 import { nodeTypes, type BoundaryFlowNode, type IntentFlowNode } from "./nodes";
 import { edgeTypes, type ChalkFlowEdge } from "./ChalkEdge";
 
-const EDGE_COLOR = { normal: "#CBD5E1", hit: "#B76DF0", dim: "#2a2f3a" } as const;
-const BOUNDARY_PAD = 26;
+const EDGE_COLOR = { normal: "#9aa0ad", hit: "#b76df0", dim: "#272c36" } as const;
+const BOUNDARY_PAD = 36;
 const BOUNDARY_ID = "__boundary:";
 
 interface Props {
@@ -65,14 +65,14 @@ export function GraphCanvas({ index, revision, focus, selectedId, onSelect, inse
   useEffect(() => {
     if (!initialized || measuredFor.current === revision || !nodes.length) return;
     measuredFor.current = revision;
-    const sizes = new Map(nodes.map((n) => [n.id, { width: n.measured?.width ?? 220, height: n.measured?.height ?? 150 }]));
+    const sizes = new Map(nodes.map((n) => [n.id, { width: n.measured?.width ?? 280, height: n.measured?.height ?? 150 }]));
     const pos = layoutGraph(index, (id) => sizes.get(id) ?? estimateSize(undefined));
     setNodes((ns) => ns.map((n) => ({ ...n, position: pos.get(n.id) ?? n.position })));
     requestAnimationFrame(() => {
       const { focus: f, insets: i } = camera.current;
       if (f?.nodeIds.size)
         fitView({ nodes: [...f.nodeIds].map((id) => ({ id })), padding: { top: "60px", bottom: "60px", left: `${i.left}px`, right: `${i.right}px` }, duration: 450, maxZoom: 1.1 });
-      else fitView({ padding: 0.12, duration: 300 });
+      else fitView(FIT);
     });
   }, [initialized, revision, nodes, index, fitView]);
 
@@ -118,8 +118,8 @@ export function GraphCanvas({ index, revision, focus, selectedId, onSelect, inse
     for (const [label, members] of groups) {
       if (members.length < 2) continue;
       const x0 = Math.min(...members.map((m) => m.position.x)) - BOUNDARY_PAD;
-      const y0 = Math.min(...members.map((m) => m.position.y)) - BOUNDARY_PAD - 14;
-      const x1 = Math.max(...members.map((m) => m.position.x + (m.measured?.width ?? 220))) + BOUNDARY_PAD;
+      const y0 = Math.min(...members.map((m) => m.position.y)) - BOUNDARY_PAD - 20;
+      const x1 = Math.max(...members.map((m) => m.position.x + (m.measured?.width ?? 280))) + BOUNDARY_PAD;
       const y1 = Math.max(...members.map((m) => m.position.y + (m.measured?.height ?? 150))) + BOUNDARY_PAD;
       boxes.push({
         id: BOUNDARY_ID + label,

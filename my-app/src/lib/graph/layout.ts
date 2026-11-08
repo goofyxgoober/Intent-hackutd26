@@ -10,9 +10,9 @@ export type Positions = Map<string, { x: number; y: number }>;
 
 /** Pre-measurement size estimates per node variant (matches index.css). */
 export function estimateSize(kind: string | undefined): Size {
-  if (kind === "test") return { width: 260, height: 170 };
-  if (kind === "infra") return { width: 160, height: 100 };
-  return { width: 220, height: 150 };
+  if (kind === "test") return { width: 280, height: 150 };
+  if (kind === "infra") return { width: 240, height: 110 };
+  return { width: 280, height: 150 };
 }
 
 /**
@@ -22,7 +22,7 @@ export function estimateSize(kind: string | undefined): Size {
  */
 export function layoutGraph(graph: GraphIndex, sizeOf: (id: string) => Size): Positions {
   const g = new dagre.graphlib.Graph({ compound: true, multigraph: true });
-  g.setGraph({ rankdir: "TB", nodesep: 48, ranksep: 90, edgesep: 20, marginx: 40, marginy: 40 });
+  g.setGraph({ rankdir: "TB", nodesep: 64, ranksep: 100, edgesep: 40, marginx: 48, marginy: 48 });
   g.setDefaultEdgeLabel(() => ({}));
 
   const boundaries = new Map<string, string[]>();
@@ -50,3 +50,8 @@ export function layoutGraph(graph: GraphIndex, sizeOf: (id: string) => Size): Po
   }
   return out;
 }
+
+/** Default camera framing: fit everything, but never shrink below a readable zoom. */
+export const FIT = { padding: 0.1, minZoom: 0.5, maxZoom: 1, duration: 300 } as const;
+/** Trees are wide: allow a smaller overview zoom. */
+export const FIT_WIDE = { ...FIT, minZoom: 0.15 } as const;

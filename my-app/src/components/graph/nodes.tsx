@@ -17,39 +17,35 @@ export type BoundaryData = { label: string; dim: boolean };
 export type BoundaryFlowNode = Node<BoundaryData, "boundary">;
 
 export const IntentNodeCard = memo(function IntentNodeCard({ data, selected }: NodeProps<IntentFlowNode>) {
-  const { node, dim, hit, score, bound } = data;
+  const { node, dim, hit, score } = data;
   const kind = node.meta?.kind ?? "flow";
-  const sub = node.meta?.status ?? (kind === "infra" ? node.source_file : node.source_file.replace(/\.(py|ts|tsx|js)$/, ""));
+  const sub = node.meta?.status ?? node.source_file.split("/").slice(-2).join("/");
 
   return (
     <div
       className={`node-card ${kind} ${selected ? "selected" : ""} ${dim ? "dim" : ""} ${hit ? "hit" : ""}`}
-      title={node.name ? `${node.name} · codebase node` : "codebase node"}
-      aria-label="codebase node"
+      title={node.node_id}
     >
       <Handle type="target" position={Position.Top} isConnectable={false} />
       <span className="node-head">
-        <strong>{node.node_id}</strong>
-        <small>{sub}</small>
+        <strong>{node.name || node.node_id}</strong>
       </span>
+      <small className="node-source">{sub}</small>
       <em>{node.intent_summary}</em>
 
       {kind === "test" && node.meta?.code_preview ? <code>{node.meta.code_preview}</code> : null}
 
       {kind === "flow" && node.business_invariants.length ? (
-        <ul>
-          {node.business_invariants.slice(0, 2).map((s) => (
-            <li key={s}>{s}</li>
-          ))}
-        </ul>
+        <span className="node-count">
+          {node.business_invariants.length} {node.business_invariants.length === 1 ? "invariant" : "invariants"}
+        </span>
       ) : null}
 
       {kind === "infra" && node.business_invariants[0] ? (
         <span className="infra-note">{node.business_invariants[0]}</span>
       ) : null}
 
-      {bound && kind !== "infra" ? <span className="bind">[bound to terminal]</span> : null}
-      {hit && score !== undefined ? <span className="hit-score">◆ {score.toFixed(2)}</span> : null}
+      {hit && score !== undefined ? <span className="hit-score" title="Retrieval relevance">{score.toFixed(2)}</span> : null}
       <Handle type="source" position={Position.Bottom} isConnectable={false} />
     </div>
   );

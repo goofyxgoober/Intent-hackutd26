@@ -14,20 +14,6 @@
 .vs-pill { position: absolute; z-index: 0; top: 3px; bottom: 3px; left: 3px; width: calc(50% - 3px); border-radius: 8px; background: var(--slate-4); box-shadow: 0 1px 0 rgba(255, 255, 255, 0.06) inset, 0 3px 10px rgba(0, 0, 0, 0.35); transition: transform 0.38s cubic-bezier(0.34, 1.4, 0.5, 1); }
 .view-switch[data-view="tenets"] .vs-pill { transform: translateX(100%); }
 
-/* ---- pipeline stepper */
-.journey { list-style: none; margin: 0; padding: 0; display: flex; align-items: center; gap: 0; font: 500 11.5px/1 var(--font-mono); white-space: nowrap; }
-.journey li { position: relative; display: flex; align-items: center; gap: 8px; padding-right: 34px; color: var(--ink-5); transition: color 0.3s; }
-.journey li:last-child { padding-right: 0; }
-.journey li::after { content: ""; position: absolute; right: 8px; top: 50%; width: 18px; height: 1.5px; border-radius: 2px; background: var(--slate-4); }
-.journey li:last-child::after { display: none; }
-.journey i { width: 20px; height: 20px; display: grid; place-items: center; border-radius: 50%; background: var(--slate-3); color: var(--ink-4); font-size: 10px; font-style: normal; transition: background 0.3s, color 0.3s, transform 0.3s; }
-.journey li.done { color: var(--ink-3); }
-.journey li.done i { background: rgba(134, 184, 148, 0.18); color: var(--chalk-green); }
-.journey li.done::after { background: var(--chalk-green); opacity: 0.6; }
-.journey li.active { color: var(--ink-hi); }
-.journey li.active i { background: var(--chalk-violet); color: #14101a; animation: stage-pulse 2s ease-out infinite; }
-@keyframes stage-pulse { 0% { box-shadow: 0 0 0 0 rgba(183, 109, 240, 0.5); } 70%, 100% { box-shadow: 0 0 0 9px rgba(183, 109, 240, 0); } }
-
 /* ---- toolbar */
 .toolbar { gap: 8px; }
 .tb-hint { margin-right: 6px; color: var(--ink-5); font-size: 11px; background: none !important; padding: 0 !important; }
@@ -41,8 +27,8 @@
 .toolbar .tb-ghost { background: var(--slate-2) !important; color: var(--ink-3) !important; }
 .toolbar .tb-ghost:hover, .toolbar .tb-ghost.on { background: var(--slate-4) !important; color: var(--ink-hi) !important; }
 .tb-ghost b { width: 15px; height: 15px; display: grid; place-items: center; border-radius: 50%; background: var(--wash-hi); font-size: 10px; }
-.toolbar .tb-primary { background: var(--chalk-violet) !important; color: #150f1c !important; font-weight: 600; }
-.toolbar .tb-primary:hover:not(:disabled) { background: var(--chalk-violet-hi) !important; color: #150f1c !important; transform: translateY(-1px); }
+.toolbar .tb-primary { background: var(--chalk-violet) !important; color: #0b0d14 !important; font-weight: 600; }
+.toolbar .tb-primary:hover:not(:disabled) { background: var(--chalk-violet-hi) !important; color: #0b0d14 !important; transform: translateY(-1px); }
 .toolbar .tb-primary:active:not(:disabled), .toolbar .tb-ghost:active { transform: scale(0.96); }
 .toolbar .tb-primary:disabled { opacity: 0.7; }
 .spin { animation: spin 0.9s linear infinite; }
@@ -94,8 +80,6 @@
 /* ---- node + tenet cards: they answer the pointer */
 .node-card { transition: transform 0.2s var(--ease), box-shadow 0.2s, background 0.2s; }
 .node-card:hover { transform: translateY(-3px); }
-.node-card.selected { animation: node-ring 2.4s ease-out infinite; }
-@keyframes node-ring { 0% { box-shadow: 0 0 0 0 rgba(183, 109, 240, 0.35); } 100% { box-shadow: 0 0 0 14px rgba(183, 109, 240, 0); } }
 .tenet-meta .ax { color: var(--chalk-green); }
 .tenet-meta .hy { color: var(--chalk-amber); }
 

@@ -3,7 +3,7 @@
 import { useRouter, useSearchParams } from "next/navigation";
 import { useEffect } from "react";
 import { useAuth } from "./AuthContext";
-import { NodeCard, Stages, StatusBar, Terminal, TopBar } from "./Chrome";
+import { TopBar } from "./Chrome";
 
 const ERROR_MESSAGES: Record<string, string> = {
   access_denied: "authorization cancelled on github.com",
@@ -26,21 +26,21 @@ function GitHubMark() {
   );
 }
 
-/** The dashed "1,200 loc monolith tangle" scribble from the canvas. */
+/** A chalk scribble: the tangle of a legacy monolith becoming one clear arrow. */
 function Tangle() {
   return (
     <figure className="tangle">
-      <svg viewBox="0 0 260 150" width="260" height="150" aria-hidden="true">
+      <svg viewBox="0 0 260 110" width="200" height="85" aria-hidden="true">
         <g fill="none" stroke="var(--line)" strokeWidth="1.4" strokeDasharray="5 4">
-          <ellipse cx="62" cy="70" rx="48" ry="52" transform="rotate(-12 62 70)" />
-          <ellipse cx="100" cy="74" rx="30" ry="58" transform="rotate(14 100 74)" />
-          <ellipse cx="130" cy="64" rx="44" ry="50" />
-          <ellipse cx="160" cy="70" rx="34" ry="56" transform="rotate(-18 160 70)" />
+          <ellipse cx="52" cy="52" rx="38" ry="40" transform="rotate(-12 52 52)" />
+          <ellipse cx="82" cy="55" rx="24" ry="44" transform="rotate(14 82 55)" />
+          <ellipse cx="108" cy="48" rx="34" ry="38" />
+          <ellipse cx="132" cy="53" rx="26" ry="42" transform="rotate(-18 132 53)" />
         </g>
-        <path d="M150 70 H250" stroke="var(--text)" strokeWidth="1.4" strokeDasharray="6 5" />
-        <path d="M244 65 l8 5 -8 5" fill="var(--text)" />
+        <path d="M160 52 H245" stroke="var(--text)" strokeWidth="1.4" strokeDasharray="6 5" />
+        <path d="M239 47 l8 5 -8 5" fill="var(--text)" />
       </svg>
-      <figcaption className="hand">1,200 loc monolith tangle</figcaption>
+      <figcaption>1,200 lines of tangle, one clear map</figcaption>
     </figure>
   );
 }
@@ -59,68 +59,25 @@ export default function LoginPage() {
 
   return (
     <div className="app">
-      <TopBar right={<span className="hand dim">vast codebase canvas</span>} />
-      <div className="subbar">
-        <Stages active={1} />
-        <div className="chips">
-          <span className="chip">step 0 · authenticate</span>
-        </div>
-      </div>
-
-      <main className="canvas login-canvas">
-        <div className="login-graph">
+      <TopBar />
+      <main className="login-canvas">
+        <section className="login-card">
           <Tangle />
-          <NodeCard
-            name="github_oauth"
-            tag="src/auth/github"
-            summary="Exchange a GitHub grant for a server-held session before any repo sync."
-            className="login-node"
-          >
-            <div className="mono-list">
-              <div>state mismatch → reject</div>
-              <div>token never leaves backend</div>
-            </div>
-            <span className="link-purple">[scope: read:user repo]</span>
-          </NodeCard>
-        </div>
-
-        <Terminal
-          className="login-terminal"
-          footer={
-            <button className="cta" onClick={login} disabled={loading}>
-              <span className="prompt">guest@intentflow:~$</span>
-              <span className="cta-input">
-                <GitHubMark /> auth --provider=github
-              </span>
-              <span className="enter">↵</span>
-            </button>
-          }
-        >
-          <div className="line">
-            <span className="purple">⚡ DISTRO →</span> Arch Linux x86_64 ·{" "}
-            <span className="purple">Nemotron 70B Agentic Core</span>
-          </div>
-          <div className="line dim">
-            TARGET → <span className="text">not connected</span> · 0 AST nodes mapped
-          </div>
-          <div className="gap" />
-          <div className="line">
-            <span className="purple">guest@intentflow:~$</span> whoami
-          </div>
-          <div className="line dim">├ no session — connect GitHub to sync a repository</div>
-          <div className="line dim">├ IntentFlow maps code into a Functional Intent Graph</div>
-          <div className="line dim">└ flows, business rules &amp; invariants — not raw syntax</div>
+          <h1>Sign in to IntentFlow</h1>
+          <p className="login-lede">
+            Connect your GitHub account to map a repository into a graph of what the code does and the rules it must keep true.
+          </p>
           {error ? (
-            <div className="line red" role="alert">
-              ✗ auth failed: {ERROR_MESSAGES[error] ?? error}
-            </div>
-          ) : (
-            <div className="line green">✓ ready. press ↵ to continue with GitHub.</div>
-          )}
-        </Terminal>
+            <p className="login-error" role="alert">
+              Sign-in failed: {ERROR_MESSAGES[error] ?? error}
+            </p>
+          ) : null}
+          <button className="btn primary login-btn" onClick={login} disabled={loading}>
+            <GitHubMark /> Continue with GitHub
+          </button>
+          <p className="login-fine">IntentFlow requests read access to your repositories. Your token stays on the server.</p>
+        </section>
       </main>
-
-      <StatusBar sync="Ayaan OAuth webhook" />
     </div>
   );
 }

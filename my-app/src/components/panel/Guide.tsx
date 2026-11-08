@@ -29,7 +29,7 @@ export function Guide() {
   return (
     <div className="guide" ref={box}>
       <button className={`tb-ghost ${open ? "on" : ""}`} onClick={() => setOpen(!open)} aria-expanded={open} aria-haspopup="dialog">
-        <b aria-hidden>?</b> Guide
+        Guide
       </button>
       {open ? (
         <div className="guide-pop" role="dialog" aria-label="How tenets, axioms and hypotheses work">

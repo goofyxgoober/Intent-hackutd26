@@ -2,13 +2,14 @@
 
 import { useEffect, useMemo, useRef, useState } from "react";
 import dagre from "@dagrejs/dagre";
+import { FIT_WIDE } from "@/lib/graph/layout";
 import { MarkerType, ReactFlow, useNodesInitialized, useReactFlow } from "@xyflow/react";
 import type { TreeView } from "@/gh/intentApi";
 import { edgeTypes, type ChalkFlowEdge } from "@/components/graph/ChalkEdge";
 import { tenetNodeTypes, type TenetFlowNode } from "./TenetNode";
 import type { Insets } from "@/components/graph/GraphCanvas";
 
-const EDGE = { normal: "#CBD5E1", hit: "#B76DF0", dim: "#2a2f3a" } as const;
+const EDGE = { normal: "#9aa0ad", hit: "#b76df0", dim: "#272c36" } as const;
 
 interface Props {
   tree: TreeView;
@@ -21,7 +22,7 @@ interface Props {
 
 function layout(tree: TreeView, size: (id: string) => { width: number; height: number }) {
   const g = new dagre.graphlib.Graph({ multigraph: true });
-  g.setGraph({ rankdir: "TB", nodesep: 36, ranksep: 80, marginx: 40, marginy: 40 });
+  g.setGraph({ rankdir: "TB", nodesep: 56, ranksep: 110, marginx: 48, marginy: 48 });
   g.setDefaultEdgeLabel(() => ({}));
   for (const t of tree.tenets) g.setNode(t.id, size(t.id));
   // only ownership edges shape the hierarchy; references would fold it into a tangle
@@ -48,7 +49,7 @@ export function TenetCanvas({ tree, selectedId, highlight, onSelect, insets }: P
   // Pass 1: lay out with size estimates; pass 2 (below) replaces it once cards are measured.
   const placed = useMemo(() => {
     if (measuredPos?.shape === shape) return measuredPos.pos;
-    const pos = layout(tree, () => ({ width: 220, height: 150 }));
+    const pos = layout(tree, () => ({ width: 280, height: 150 }));
     return new Map(tree.tenets.map((t) => [t.id, pos(t.id)]));
   }, [measuredPos, shape, tree]);
 
@@ -66,14 +67,14 @@ export function TenetCanvas({ tree, selectedId, highlight, onSelect, insets }: P
   useEffect(() => {
     if (!initialized || measured.current === shape || !tree.tenets.length) return;
     measured.current = shape;
-    const sizes = new Map(getNodes().map((n) => [n.id, { width: n.measured?.width ?? 220, height: n.measured?.height ?? 150 }]));
-    const pos = layout(tree, (id) => sizes.get(id) ?? { width: 220, height: 150 });
+    const sizes = new Map(getNodes().map((n) => [n.id, { width: n.measured?.width ?? 280, height: n.measured?.height ?? 150 }]));
+    const pos = layout(tree, (id) => sizes.get(id) ?? { width: 280, height: 150 });
     setMeasuredPos({ shape, pos: new Map(tree.tenets.map((t) => [t.id, pos(t.id)])) });
     requestAnimationFrame(() => {
       const { highlight: h, insets: i } = camera.current;
       if (h?.size)
         fitView({ nodes: [...h].map((id) => ({ id })), padding: { top: "60px", bottom: "60px", left: `${i.left}px`, right: `${i.right}px` }, duration: 450, maxZoom: 1.1 });
-      else fitView({ padding: 0.12, duration: 300 });
+      else fitView(FIT_WIDE);
     });
   }, [initialized, shape, base, tree, fitView, getNodes]);
 
@@ -110,10 +111,12 @@ export function TenetCanvas({ tree, selectedId, highlight, onSelect, insets }: P
     };
     for (const t of tree.tenets) {
       for (const c of t.children) if (ids.has(c)) out.push(mk(`own:${t.id}:${c}`, t.id, c, "owns", false));
-      for (const r of t.references) if (ids.has(r)) out.push(mk(`ref:${t.id}:${r}`, t.id, r, "references", true));
+      // cross-references only appear around the selected tenet; drawn for all of them they bury the tree
+      if (selectedId && (t.id === selectedId || t.references.includes(selectedId)))
+        for (const r of t.references) if (ids.has(r) && (t.id === selectedId || r === selectedId)) out.push(mk(`ref:${t.id}:${r}`, t.id, r, "references", true));
     }
     return out;
-  }, [tree.tenets, highlight]);
+  }, [tree.tenets, highlight, selectedId]);
 
   return (
     <ReactFlow
