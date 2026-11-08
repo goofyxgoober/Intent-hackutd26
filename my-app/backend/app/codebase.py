@@ -5,6 +5,7 @@ Codebase view's edges are reliable. Supported: Python and TypeScript/JavaScript.
 """
 import io
 import json
+from pathlib import Path
 import posixpath
 import re
 import tarfile

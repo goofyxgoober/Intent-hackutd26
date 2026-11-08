@@ -48,6 +48,7 @@ __pycache__/
 *.pyc
 .venv/
 *.db
-data/
+/data/
 backend/data/
+!src/data/
 .pytest_cache/
