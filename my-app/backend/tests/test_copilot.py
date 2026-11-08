@@ -142,6 +142,9 @@ def test_frontend_ui_bridge_contracts():
     assert len(tests_data["tests"]) >= 2
 
     # 3. GET /api/repos/:repo/graph
-    r_graph = client.get(f"/api/repos/{repo}/graph")
+    # A GitHub repo (owner/name) is the signed-in user's own data: no session, no graph.
+    assert client.get(f"/api/repos/{repo}/graph").status_code == 401
+    # The demo graph is served at /api/graph ("/api/repos/<name>/graph" belongs to the connected-repo router).
+    r_graph = client.get("/api/graph")
     assert r_graph.status_code == 200
     assert "nodes" in r_graph.json()

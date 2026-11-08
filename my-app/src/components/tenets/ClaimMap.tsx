@@ -69,7 +69,7 @@ export function ClaimMap({ groups, activeClaim, onOpenClaim, onOpenTenet }: Prop
 
       <div className="cm-legend">
         <span><i className="sw ax" /> axiom · locked</span>
-        <span><i className="sw hyp" /> hypothesis · editable</span>
+        <span><i className="sw hyp" /> hypothesis · proposed</span>
         <span>✓ pass · ✗ fail · ↻ stale · ? inconclusive · · untested</span>
         <span className="note">height = confidence · dots = dependencies</span>
       </div>

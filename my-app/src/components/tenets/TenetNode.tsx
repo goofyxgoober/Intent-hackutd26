@@ -21,8 +21,8 @@ export const TenetCard = memo(function TenetCard({ data, selected }: NodeProps<T
       </span>
       <em>{t.functionality || "no functionality statement yet"}</em>
       <span className="tenet-meta">
-        <span className="ax">{t.axioms}A</span>
-        <span>{t.hypotheses}H</span>
+        <span className="ax" title="Axioms: locked, human-confirmed rules">◆ {t.axioms} locked</span>
+        <span className="hy" title="Hypotheses: proposed rules, still editable">◇ {t.hypotheses} proposed</span>
         {t.flagged_axioms > 0 ? <span className="flag">⚑ {t.flagged_axioms}</span> : null}
         {t.proposed ? <span className="warn">proposed</span> : null}
         {t.references.length ? <span>↗ {t.references.length}</span> : null}

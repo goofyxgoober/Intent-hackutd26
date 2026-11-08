@@ -18,46 +18,93 @@ import { Terminal } from "@/components/Terminal";
 import { TenetCanvas } from "@/components/tenets/TenetCanvas";
 import { TenetInspector } from "@/components/tenets/TenetInspector";
 import { ClaimDetail } from "@/components/tenets/ClaimDetail";
+import { Guide } from "@/components/panel/Guide";
+import { TokenMeter } from "@/components/panel/TokenMeter";
 
 type View = "graph" | "tenets";
 
 // Client-only module (loaded with ssr:false), so window/location are safe here.
 const config = getConfig();
 const source = createSource(config);
-const STAGES = ["01. raw ast tangle", "02. functional intent graph", "03. modern branch merge"];
+const STAGES = ["Raw AST", "Intent graph", "Modern merge"];
+
+const VIEWS: { id: View; label: string; hint: string }[] = [
+  { id: "graph", label: "Codebase", hint: "What the code does" },
+  { id: "tenets", label: "Tenets", hint: "What it must keep true" },
+];
 
 function ViewSwitch({ view, onChange }: { view: View; onChange(v: View): void }) {
   return (
-    <div className="view-switch" role="tablist" aria-label="Workspace view">
-      <button role="tab" aria-selected={view === "graph"} className={view === "graph" ? "active" : ""} onClick={() => onChange("graph")}>
-        codebase graph
-      </button>
-      <button role="tab" aria-selected={view === "tenets"} className={view === "tenets" ? "active" : ""} onClick={() => onChange("tenets")}>
-        axiom / tenet hierarchy
-      </button>
+    <div className="view-switch" role="tablist" aria-label="Workspace view" data-view={view}>
+      <i className="vs-pill" aria-hidden />
+      {VIEWS.map((v) => (
+        <button key={v.id} role="tab" aria-selected={view === v.id} className={view === v.id ? "active" : ""} onClick={() => onChange(v.id)} title={v.hint}>
+          {v.label}
+        </button>
+      ))}
     </div>
   );
+}
+
+const Icon = {
+  minus: <path d="M5 12h14" />,
+  plus: <path d="M12 5v14M5 12h14" />,
+  sync: <path d="M20 11a8 8 0 0 0-14-4M4 5v4h4M4 13a8 8 0 0 0 14 4m2 2v-4h-4" />,
+  git: <path d="M9 19c-4 1-4-2-6-2m12 4v-3.500a3 3 0 0 0-1-2.500c3 0 6-1.500 6-6a4.600 4.600 0 0 0-1.300-3.200 4.200 4.200 0 0 0-.1-3.200s-1.100-.3-3.500 1.300a12 12 0 0 0-6.200 0C6.500 2.800 5.400 3.100 5.400 3.100a4.200 4.200 0 0 0-.1 3.200A4.600 4.600 0 0 0 4 9.500c0 4.600 3 6 6 6a3 3 0 0 0-1 2.500V21" />,
+};
+const Svg = ({ d, spin }: { d: keyof typeof Icon; spin?: boolean }) => (
+  <svg className={spin ? "spin" : ""} viewBox="0 0 24 24" width="14" height="14" fill="none" stroke="currentColor" strokeWidth="2" strokeLinecap="round" strokeLinejoin="round" aria-hidden>
+    {Icon[d]}
+  </svg>
+);
+
+interface Me { login: string; avatar_url: string }
+
+/** Who the backend thinks is signed in (the GitHub session cookie), or null. Offline fixture has no account. */
+function useMe(): Me | null | undefined {
+  const [me, setMe] = useState<Me | null | undefined>(source.kind === "http" ? undefined : null);
+  useEffect(() => {
+    if (source.kind !== "http") return;
+    let off = false;
+    fetch("/auth/me", { credentials: "include" })
+      .then((r) => (r.ok ? r.json() : null))
+      .then((u) => !off && setMe(u))
+      .catch(() => !off && setMe(null));
+    return () => {
+      off = true;
+    };
+  }, []);
+  return me;
 }
 
 function Toolbar({ onSync, syncing, view }: { onSync(): void; syncing: boolean; view: View }) {
   const { zoom } = useViewport();
   const { zoomIn, zoomOut, fitView } = useReactFlow();
+  const me = useMe();
   return (
     <div className="toolbar">
-      <button onClick={() => zoomOut({ duration: 150 })} aria-label="Zoom out">
-        −
+      <span className="tb-hint" aria-hidden>
+        <kbd>click</kbd> {view === "graph" ? "a node" : "a tenet"} <kbd>/</kbd> ask <kbd>esc</kbd> clear
+      </span>
+      <div className="tb-group" role="group" aria-label="Zoom">
+        <button onClick={() => zoomOut({ duration: 150 })} aria-label="Zoom out"><Svg d="minus" /></button>
+        <button className="tb-zoom" onClick={() => fitView({ padding: 0.12, duration: 300 })} title="Fit graph to screen">
+          {Math.round(zoom * 100)}%
+        </button>
+        <button onClick={() => zoomIn({ duration: 150 })} aria-label="Zoom in"><Svg d="plus" /></button>
+      </div>
+      <Guide />
+      <a className="tb-ghost" href="/dashboard" title="GitHub repos, sync and history"><Svg d="git" /> Repos</a>
+      {me === null && source.kind === "http" ? (
+        <a className="tb-ghost" href="/login">Sign in</a>
+      ) : me ? (
+        <a className="tb-me" href="/dashboard" title={`Signed in as ${me.login}`}>
+          <img src={me.avatar_url} alt="" width={22} height={22} />
+        </a>
+      ) : null}
+      <button className={`tb-primary ${syncing ? "syncing" : ""}`} onClick={onSync} disabled={syncing}>
+        <Svg d="sync" spin={syncing} /> {syncing ? "Syncing" : "Sync repo"}
       </button>
-      <button onClick={() => fitView({ padding: 0.12, duration: 300 })} title="Fit graph">
-        {Math.round(zoom * 100)}%
-      </button>
-      <button onClick={() => zoomIn({ duration: 150 })} aria-label="Zoom in">
-        +
-      </button>
-      <button className={syncing ? "syncing" : ""} onClick={onSync} disabled={syncing}>
-        {syncing ? "syncing…" : "sync repo"}
-      </button>
-      <a href="/dashboard" title="GitHub repos, sync and history">github repos</a>
-      <span>{view === "graph" ? "click nodes to inspect · / to query" : "click tenets to inspect · / to query"}</span>
     </div>
   );
 }
@@ -109,11 +156,7 @@ function StatusBar({ g, focus, view, tenets }: { g: IntentGraphState; focus: Foc
           : g.status === "error"
             ? "“graph unavailable”"
             : "“distilling ast…”"}
-        {view === "graph" && focus ? (
-          <b>
-            {focus.nodeIds.size} in context · ~{focus.tokens} tokens
-          </b>
-        ) : null}
+        {view === "graph" && focus && g.index ? <TokenMeter index={g.index} focus={focus} /> : null}
       </p>
     </footer>
   );
@@ -328,14 +371,14 @@ function Workspace() {
     <main className="workspace">
       <header className="legend">
         <ViewSwitch view={view} onChange={setView} />
-        <div className="journey" aria-label="Modernization pipeline">
-          {STAGES.map((s, i) => (
-            <span key={s} className="stage">
-              {i > 0 ? <b>→</b> : null}
-              <span className={g.stage === i ? "active" : ""}>{s}</span>
-            </span>
+        <ol className="journey" aria-label="Modernization pipeline">
+          {STAGES.map((label, i) => (
+            <li key={label} className={g.stage > i ? "done" : g.stage === i ? "active" : ""} aria-current={g.stage === i ? "step" : undefined}>
+              <i aria-hidden>{g.stage > i ? "✓" : i + 1}</i>
+              <span>{label}</span>
+            </li>
           ))}
-        </div>
+        </ol>
         <Toolbar onSync={() => run("sync")} syncing={syncing} view={view} />
       </header>
 
@@ -353,7 +396,7 @@ function Workspace() {
               }}
               insets={{
                 left: termOpen && !termMin && window.innerWidth > 900 ? 570 : 40,
-                right: openClaimId ? 520 : tenetId ? 400 : 40,
+                right: openClaimId ? 520 : tenetId ? 450 : 40,
               }}
             />
           ) : (
@@ -383,7 +426,7 @@ function Workspace() {
               )}
             </div>
           )
-        ) : g.index ? (
+        ) : g.index && g.index.nodes.size > 0 ? (
           <GraphCanvas
             index={g.index}
             revision={g.revision}
@@ -392,17 +435,33 @@ function Workspace() {
             onSelect={(id) => void select(id, true)}
             insets={{
               left: termOpen && !termMin && window.innerWidth > 900 ? 570 : 40,
-              right: selectedId ? 350 : 40,
+              right: selectedId ? 415 : 40,
             }}
           />
         ) : (
           <div className="graph-empty">
             <img src="/assets/94db2.svg" alt="" />
-            {g.status === "error" ? (
+            {g.status === "error" && /^401/.test(g.error ?? "") ? (
               <>
-                <i className="chalk-note">couldn't reach the intent graph</i>
+                <i className="chalk-note">sign in to read {config.repo}</i>
+                <a className="empty-link" href="/login">sign in with github</a>
+              </>
+            ) : g.status === "error" && /^404/.test(g.error ?? "") ? (
+              <>
+                <i className="chalk-note">{config.repo} isn&apos;t connected yet</i>
+                <a className="empty-link" href="/dashboard">connect a github repo</a>
+              </>
+            ) : g.status === "error" ? (
+              <>
+                <i className="chalk-note">couldn&apos;t reach the intent graph</i>
                 <code>{g.error}</code>
                 <button onClick={() => g.sync()}>retry</button>
+              </>
+            ) : g.index ? (
+              <>
+                <i className="chalk-note">{config.repo} hasn&apos;t been read yet</i>
+                <code>pull the code, map the imports, draft the first tenets</code>
+                <button onClick={() => void run("sync")} disabled={syncing}>{syncing ? "reading the code…" : "read this repo"}</button>
               </>
             ) : (
               <i className="chalk-note">untangling {config.repo}…</i>

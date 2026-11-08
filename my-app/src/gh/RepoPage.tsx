@@ -146,7 +146,7 @@ export default function RepoPage({ owner, repo }: { owner: string; repo: string 
           <Link className="chip" href="/dashboard">
             ← repos
           </Link>
-          <Link className="chip" href={`/?repo=${encodeURIComponent(repo)}`}>
+          <Link className="chip" href={`/?repo=${encodeURIComponent(`${owner}/${repo}`)}`}>
             graph view →
           </Link>
           <button className="btn" onClick={sync} disabled={busy}>

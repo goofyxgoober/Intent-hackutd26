@@ -8,6 +8,7 @@ import json
 import posixpath
 import re
 import tarfile
+from pathlib import Path
 from typing import Dict, List, Optional, Set, Tuple
 
 from fastapi import HTTPException

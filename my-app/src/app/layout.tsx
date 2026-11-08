@@ -2,6 +2,7 @@ import type { Metadata } from "next";
 import "./globals.css";
 import "./theme.css";
 import "./panel.css";
+import "./chrome.css";
 import ChalkBoard from "@/components/ChalkBoard";
 
 export const metadata: Metadata = {

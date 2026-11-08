@@ -68,7 +68,7 @@ export function Inspector({ index, nodeId, focus, onSelect, onGenerateTests, ten
     }
   }
 
-  const Chips = ({ items, empty }: { items: { id: string; relation: string }[]; empty: string }) =>
+  const chips = (items: { id: string; relation: string }[], empty: string) =>
     items.length ? (
       <div className="pn-chips">
         {items.map((d) => (
@@ -146,7 +146,7 @@ export function Inspector({ index, nodeId, focus, onSelect, onGenerateTests, ten
       {tab === "links" ? (
         <>
           <Block title="Depends on" aside={downstream.length || undefined}>
-            <Chips items={downstream} empty="Terminal boundary. Nothing downstream." />
+            {chips(downstream, "Terminal boundary. Nothing downstream.")}
             {external.length ? (
               <div className="pn-chips ext">
                 {external.map((id) => (
@@ -158,7 +158,7 @@ export function Inspector({ index, nodeId, focus, onSelect, onGenerateTests, ten
             ) : null}
           </Block>
           <Block title="Used by" aside={upstream.length || undefined}>
-            <Chips items={upstream} empty="Entry point. Nothing calls it." />
+            {chips(upstream, "Entry point. Nothing calls it.")}
           </Block>
           {tenets?.length ? (
             <Block title="Constrained by tenets" aside={tenets.length}>

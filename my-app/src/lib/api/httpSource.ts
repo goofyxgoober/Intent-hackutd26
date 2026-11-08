@@ -12,14 +12,25 @@ import type { AgentReply, GeneratedTests, GraphSource, GraphStreamHandlers, Grap
 export function createHttpSource(apiBase: string, wsBase?: string): GraphSource {
   const api = new URL(apiBase.replace(/\/$/, ""), window.location.href).href.replace(/\/$/, "");
   const ws = (wsBase ?? api.replace(/^http/, "ws")).replace(/\/$/, "");
-  const repoPath = (repo: string) => `/repos/${encodeURIComponent(repo)}`;
+  // "owner/name" keeps its slash: the backend routes GitHub repos by owner and name.
+  const repoPath = (repo: string) => `/repos/${repo.split("/").map(encodeURIComponent).join("/")}`;
 
   async function json<T>(path: string, init?: RequestInit): Promise<T> {
     const res = await fetch(`${api}${path}`, {
+      credentials: "include",
       ...init,
       headers: { "Content-Type": "application/json", ...init?.headers },
     });
-    if (!res.ok) throw new Error(`${init?.method ?? "GET"} ${path} → ${res.status} ${res.statusText}`);
+    if (!res.ok) {
+      let detail = "";
+      try {
+        const body = await res.json();
+        detail = typeof body.detail === "string" ? body.detail : (body.detail?.message ?? "");
+      } catch {
+        /* no JSON body */
+      }
+      throw new Error(`${res.status} ${detail || res.statusText}`.trim());
+    }
     return res.status === 204 || res.status === 202 ? (undefined as T) : res.json();
   }
 
@@ -27,9 +38,13 @@ export function createHttpSource(apiBase: string, wsBase?: string): GraphSource 
     kind: "http",
     label: new URL(api).host,
 
-    fetchGraph: (repo, signal) => json<IntentGraphPayload>(`${repoPath(repo)}/graph`, { signal }),
+    // "owner/name" is a connected GitHub repo; a bare name is the seeded demo graph.
+    fetchGraph: (repo, signal) => json<IntentGraphPayload>(repo.includes("/") ? `${repoPath(repo)}/graph` : "/graph", { signal }),
 
-    requestSync: (repo) => json<void>(`${repoPath(repo)}/sync`, { method: "POST" }),
+    // A GitHub repo runs the full pipeline (pull, snapshot, annotate, tenets); the demo graph has nothing to pull.
+    requestSync: async (repo) => {
+      if (repo.includes("/")) await json<void>(`${repoPath(repo)}/pipeline`, { method: "POST" });
+    },
 
     generateTests: (repo, nodeId) =>
       json<GeneratedTests>(`${repoPath(repo)}/nodes/${encodeURIComponent(nodeId)}/tests`, { method: "POST" }),

@@ -3,14 +3,16 @@ import sqlite3
 import time
 from typing import Optional
 
-from fastapi import APIRouter, Depends, HTTPException, Response
+import json
+from fastapi import APIRouter, Depends, HTTPException, Response, WebSocket, WebSocketDisconnect
 
-from . import db, sync
+from . import db, events, graph_view, sync
 from .auth import require_session
 from .github import check_ref, compare_refs
 from .github_client import gh
 from .intent.store import IntentStore
-from .sessions import Session
+from .config import settings
+from .sessions import Session, get_session
 
 router = APIRouter(prefix="/api/repos", tags=["repos"])
 
@@ -130,12 +132,65 @@ async def run_repo_pipeline(repo: ConnectedRepo = Depends(connected_repo)) -> di
     """Run full 4-step pipeline: pull code, check commit diffs, create requirements/files, start tenet grilling."""
     token = repo.session.access_token
     full_name = repo.full_name
+    events.emit(repo.id, "graph.stage", stage=0, message=f"pulling {full_name} and untangling the AST")
     head = await sync._branch_head(token, full_name, repo.default_branch)
     from . import pipeline
-    return await pipeline.execute_full_pipeline(
+    result = await pipeline.execute_full_pipeline(
         workspace_id=repo.id,
         token=token,
         full_name=full_name,
         head_sha=head,
         base_sha=repo.last_synced_sha,
     )
+    events.emit(repo.id, "graph.refresh")
+    return result
+
+
+# ---------------------------------------------------------------- intent graph for the Codebase view
+
+
+@router.get("/{owner}/{repo}/graph")
+def repo_graph(repo: ConnectedRepo = Depends(connected_repo)) -> dict:
+    """The Functional Intent Graph for this repo. Empty `nodes` until it has been synced once."""
+    return graph_view.build_graph(IntentStore(repo.id), repo.full_name)
+
+
+class _GraphSocket:
+    """Adapts workspace events to the graph stream the dashboard reads (docs/graph-frontend-contract.md)."""
+
+    def __init__(self, ws: WebSocket, repo_id: int, full_name: str):
+        self.ws, self.repo_id, self.full_name = ws, repo_id, full_name
+
+    async def snapshot(self, stage: int = 1, message: str = "") -> None:
+        graph = graph_view.build_graph(IntentStore(self.repo_id), self.full_name)
+        await self.ws.send_json({"type": "snapshot", "graph": graph})
+        await self.ws.send_json({"type": "status", "stage": stage if graph["nodes"] else 0, "message": message})
+
+    async def send_text(self, raw: str) -> None:  # called by events._broadcast
+        event = json.loads(raw)
+        kind = event.get("type", "")
+        if kind == "graph.stage":
+            await self.ws.send_json({"type": "status", "stage": event.get("stage", 0), "message": event.get("message", "")})
+        elif kind == "graph.refresh" or kind.startswith(("sync.", "claim.", "tenet.")):
+            await self.snapshot(1, "graph refreshed" if kind == "graph.refresh" else kind.replace(".", " "))
+
+
+@router.websocket("/{owner}/{repo}/graph")
+async def repo_graph_stream(websocket: WebSocket, owner: str, repo: str):
+    """Snapshot on connect, then a fresh snapshot after every sync or tenet change."""
+    session = get_session(websocket.cookies.get(settings.session_cookie))
+    row = db.fetch_repo(session.user_id, f"{owner}/{repo}") if session else None
+    if row is None:
+        await websocket.close(code=4401 if session is None else 4404)
+        return
+    await websocket.accept()
+    sock = _GraphSocket(websocket, row["id"], row["full_name"])
+    await events.subscribe(row["id"], sock)  # type: ignore[arg-type]
+    try:
+        await sock.snapshot(message=f"connected to {row['full_name']}")
+        while True:
+            await websocket.receive_text()
+    except WebSocketDisconnect:
+        pass
+    finally:
+        events.unsubscribe(row["id"], sock)  # type: ignore[arg-type]

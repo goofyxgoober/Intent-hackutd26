@@ -74,7 +74,7 @@ export default function DashboardPage() {
                 <div>lang: {r.language ?? "—"}</div>
                 <div>branch: {r.default_branch}</div>
               </div>
-              <Link className="link-purple" href={`/?repo=${encodeURIComponent(r.full_name.split("/")[1])}`}>
+              <Link className="link-purple" href={`/?repo=${encodeURIComponent(r.full_name)}`}>
                 [open graph]
               </Link>{" "}
               <Link className="link-purple" href={`/repos/${r.full_name}`}>

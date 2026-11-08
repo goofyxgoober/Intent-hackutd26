@@ -286,3 +286,38 @@ def test_connect_is_case_insensitive_and_idempotent(client):
 
 def test_unconnected_repo_is_404(client):
     assert client.get(f"/api/repos/{REPO}/changes").status_code == 404
+
+
+def test_repo_graph_is_built_from_the_synced_snapshot_and_requires_a_session(tmp_path, monkeypatch):
+    """The Codebase view's graph for a connected repo: files as intent nodes, imports as edges."""
+    from app import db, sessions
+    monkeypatch.setattr(settings, "data_dir", str(tmp_path))  # a fresh intent folder, whatever workspace id the db hands out
+    from app.actors import Actor
+    from app.intent.store import IntentStore
+
+    with TestClient(app) as c:
+        uid = db.upsert_user(901, "graph-tester")
+        with db.connect() as conn:
+            conn.execute("DELETE FROM repos WHERE user_id = ? AND full_name = ?", (uid, "o/graphy"))
+        sid = sessions.create_session("tok", {"login": "graph-tester"}, uid)
+        with db.connect() as conn:
+            conn.execute("INSERT INTO repos (user_id, full_name, default_branch, connected_at) VALUES (?,?,?,?)",
+                         (uid, "o/graphy", "main", 0))
+        rid = db.fetch_repo(uid, "o/graphy")["id"]
+        assert c.get("/api/repos/o/graphy/graph").status_code == 401
+        c.cookies.set("intentflow_session", sid)
+        assert c.get("/api/repos/o/graphy/graph").json()["nodes"] == []  # not synced yet
+        store = IntentStore(rid)
+        store.put_imports({"head": "x", "external": [],
+                           "files": [{"path": "src/a.py", "size": 4000}, {"path": "src/b.py", "size": 800}, {"path": "README.md", "size": 5}],
+                           "edges": [{"source": "src/a.py", "target": "src/b.py"}]})
+        store.put_annotation(Actor(kind="engine", name="t"), "src/a.py",
+                             {"path": "src/a.py", "file_hash": "h", "chunks": [],
+                              "summary": {"purpose": "Does A", "responsibilities": [], "dependencies": [], "sections": []}})
+        g = c.get("/api/repos/o/graphy/graph").json()
+        assert {n["node_id"] for n in g["nodes"]} == {"src/a.py", "src/b.py"}  # README is not source
+        assert g["edges"] == [{"source": "src/a.py", "target": "src/b.py", "relation": "imports"}]
+        a = next(n for n in g["nodes"] if n["node_id"] == "src/a.py")
+        assert a["intent_summary"] == "Does A" and a["meta"]["raw_tokens"] == 1000
+        with c.websocket_connect("/api/repos/o/graphy/graph") as ws:
+            assert ws.receive_json()["type"] == "snapshot"

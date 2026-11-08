@@ -24,6 +24,8 @@ export interface IntentNodeMeta {
   boundary?: string;
   /** Small code excerpt shown on test nodes. */
   code_preview?: string;
+  /** Tokens the raw source of this node would cost an LLM. Drives the Raw vs Intent token meter. */
+  raw_tokens?: number;
 }
 
 /** CONTEXT.md §5.2 edge. */

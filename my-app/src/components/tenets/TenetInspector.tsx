@@ -5,6 +5,7 @@ import type { Claim, Tenet, TreeView, workspaceApi } from "@/gh/intentApi";
 import { VERDICT_GLYPH } from "@/lib/claimStyle";
 import { claimGroups, pathsUnder } from "@/lib/tenetLinks";
 import { ClaimMap } from "./ClaimMap";
+import { TERMS } from "@/components/panel/Guide";
 import { Block, CopyChip, Panel, Ring } from "@/components/panel/Panel";
 
 type Api = ReturnType<typeof workspaceApi>;
@@ -179,6 +180,14 @@ export function TenetInspector({ tree, tenetId, wsApi, graphNodes, activeClaim, 
 
       {tab === "claims" ? (
         <>
+          <div className="pn-terms">
+            {(["axiom", "hypothesis"] as const).map((k) => (
+              <div key={k} className={k}>
+                <b>{TERMS[k].glyph} {TERMS[k].name} · {TERMS[k].state}</b>
+                <span>{TERMS[k].def}</span>
+              </div>
+            ))}
+          </div>
           <Block title="Claim map">
             <ClaimMap groups={groups} activeClaim={activeClaim} onOpenClaim={onOpenClaim} onOpenTenet={onSelect} />
           </Block>
@@ -188,7 +197,7 @@ export function TenetInspector({ tree, tenetId, wsApi, graphNodes, activeClaim, 
                 {ordered.map((c) => (
                   <li key={c.id}>
                     <button className={`${c.status === "axiom" ? "ax" : "hy"} ${activeClaim === c.id ? "active" : ""} ${c.flags.length ? "flagged" : ""}`} onClick={() => onOpenClaim(c.id)}>
-                      <span className="kind">{c.status === "axiom" ? "◆ axiom" : "◇ hypothesis"}</span>
+                      <span className="kind">{c.status === "axiom" ? "◆ Axiom · locked" : "◇ Hypothesis · proposed"}</span>
                       <span className="text">{c.statement}</span>
                       <span className="meta">
                         <i className={`g v-${c.result.verdict}`}>{VERDICT_GLYPH[c.result.verdict]} {c.result.verdict}</i>
@@ -240,8 +249,8 @@ export function TenetInspector({ tree, tenetId, wsApi, graphNodes, activeClaim, 
                         <b>{c.name}</b>
                         <span>{firstSentence(c.functionality) || "No description"}</span>
                         <small>
-                          <i className="ax">{c.axioms} axioms</i>
-                          <i className="hy">{c.hypotheses} hyp.</i>
+                          <i className="ax">◆ {c.axioms} locked</i>
+                          <i className="hy">◇ {c.hypotheses} proposed</i>
                           <i>{VERDICT_GLYPH[c.rollup]} {c.rollup}</i>
                           {c.flagged_axioms ? <i className="bad">⚑ {c.flagged_axioms}</i> : null}
                         </small>

@@ -90,7 +90,7 @@ export function useIntentGraph(source: GraphSource, repo: string): IntentGraphSt
       setStage(0);
       try {
         await source.requestSync(repo);
-        if (!source.subscribe) await load("syncing");
+        await load("syncing"); // the stream may be down; always pull the fresh graph
       } catch (e) {
         setError(e instanceof Error ? e.message : String(e));
         setStatus("error");
