@@ -167,3 +167,46 @@ button { font: inherit; }
   .cta .prompt { width: 100%; }
   .cta-input { white-space: nowrap; }
 }
+
+/* repo page */
+:root { --amber: #f5b94a; }
+a.chip, a.link-purple { text-decoration: none; }
+a.chip:hover { color: var(--text); }
+.btn:disabled { opacity: 0.5; cursor: default; }
+.btn.primary { background: var(--purple); color: var(--bg); border-color: var(--purple); }
+.btn.danger { color: var(--red); }
+.node-tag.warn { color: var(--amber); }
+.node-stale { border-color: rgba(245, 185, 74, 0.45); }
+.as-button { background: none; border: 0; padding: 0; font: inherit; font-size: 12px; cursor: pointer; }
+.repo-canvas { grid-template-columns: minmax(0, 1fr) minmax(0, 420px); align-items: start; }
+.col { display: grid; gap: 20px; min-width: 0; }
+.section-head { display: flex; justify-content: space-between; align-items: center; gap: 12px; }
+.section-head h2 { margin: 0; font-size: 26px; font-weight: 500; }
+.intent-grid { display: grid; grid-template-columns: repeat(auto-fill, minmax(260px, 1fr)); gap: 16px; }
+.empty { font-size: 19px; margin: 0; }
+.file-list { list-style: none; margin: 0; padding: 0; }
+.file-row {
+  width: 100%; display: flex; align-items: baseline; gap: 10px; padding: 8px 0; text-align: left;
+  background: none; border: 0; border-top: 1px solid var(--border); color: var(--text); cursor: pointer; font-size: 12px;
+}
+.file-row:hover .fpath { color: var(--purple); }
+.fstatus { width: 64px; flex: none; color: var(--dim); }
+.fstatus.added { color: var(--green); }
+.fstatus.removed { color: var(--red); }
+.fstatus.modified, .fstatus.renamed { color: var(--amber); }
+.fpath { flex: 1; min-width: 0; overflow-wrap: anywhere; }
+.fdelta { flex: none; }
+.patch {
+  margin: 0 0 8px; padding: 10px 12px; max-height: 260px; overflow: auto;
+  background: var(--bg); border: 1px solid var(--border); font-size: 11px; line-height: 1.5; color: var(--dim);
+}
+.editor {
+  width: 100%; min-height: 300px; resize: vertical; padding: 12px; font: 12px/1.6 var(--mono);
+  background: var(--bg); color: var(--text); border: 1px solid var(--line); border-radius: 2px;
+}
+.editor:focus { outline: none; border-color: var(--purple); }
+.row-actions { display: flex; gap: 8px; margin-top: 12px; flex-wrap: wrap; }
+@media (max-width: 900px) {
+  .repo-canvas { grid-template-columns: minmax(0, 1fr); }
+  .subbar .chips { flex-wrap: wrap; }
+}

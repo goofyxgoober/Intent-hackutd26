@@ -1,10 +1,19 @@
+from contextlib import asynccontextmanager
+
 from fastapi import FastAPI
 from fastapi.middleware.cors import CORSMiddleware
 
-from . import auth, github
+from . import auth, db, github, repos, webhooks
 from .config import settings
 
-app = FastAPI(title="IntentFlow API")
+
+@asynccontextmanager
+async def lifespan(_: FastAPI):
+    db.init_db()
+    yield
+
+
+app = FastAPI(title="IntentFlow API", lifespan=lifespan)
 
 app.add_middleware(
     CORSMiddleware,
@@ -16,6 +25,8 @@ app.add_middleware(
 
 app.include_router(auth.router)
 app.include_router(github.router)
+app.include_router(repos.router)
+app.include_router(webhooks.router)
 
 
 @app.get("/health")

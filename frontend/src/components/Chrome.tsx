@@ -90,7 +90,7 @@ export function NodeCard({
 }: {
   name: string;
   tag?: string;
-  tagTone?: "ok" | "muted";
+  tagTone?: "ok" | "muted" | "warn";
   summary?: string;
   children?: ReactNode;
   className?: string;
@@ -99,7 +99,7 @@ export function NodeCard({
     <article className={`node ${className}`}>
       <div className="node-head">
         <span className="node-name">{name}</span>
-        {tag && <span className={tagTone === "ok" ? "node-tag ok" : "node-tag"}>{tag}</span>}
+        {tag && <span className={`node-tag ${tagTone ?? ""}`}>{tag}</span>}
       </div>
       {summary && <p className="node-summary hand">{summary}</p>}
       {children && <div className="node-body">{children}</div>}

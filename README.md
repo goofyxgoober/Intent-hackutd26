@@ -21,16 +21,51 @@ IntentFlow — intent-driven legacy codebase modernization (HackUTD '26).
    npm run dev            # http://localhost:5173
    ```
 
-### Auth endpoints
+### Two-factor authentication
+Sign-in is GitHub OAuth. GitHub asks for the user's 2FA code during login, and the
+backend also rejects any account that doesn't have 2FA turned on
+(`REQUIRE_GITHUB_2FA=true`, the default). Set it to `false` for test accounts.
+
+### API
+All `/api` routes need a signed-in session. Data is stored per user **and** per repo
+in SQLite (`DATABASE_PATH`, default `backend/intentflow.db`).
+
 | Method | Path | Purpose |
 |---|---|---|
 | GET | `/auth/github/login` | Redirects to GitHub (sets CSRF `state` cookie) |
-| GET | `/auth/github/callback` | Exchanges code, creates session, redirects to `/dashboard` |
-| GET | `/auth/me` | Current user, or 401 |
-| POST | `/auth/logout` | Ends session |
-| GET | `/api/github/repos` | Repos the signed-in user can access |
+| GET | `/auth/github/callback` | Exchanges code, checks 2FA, creates session |
+| GET | `/auth/me` · POST `/auth/logout` | Current user · end session |
+| GET | `/api/github/repos` | Repos the user can access |
+| GET | `/api/github/repos/{owner}/{repo}/tree?ref=` | All file paths |
+| GET | `/api/github/repos/{owner}/{repo}/file?path=&ref=` | One file's text |
+| GET | `/api/github/repos/{owner}/{repo}/commits` | Recent commits |
+| GET | `/api/repos` | Repos this user connected |
+| POST | `/api/repos/{owner}/{repo}/connect` | Connect a repo (checks access) |
+| DELETE | `/api/repos/{owner}/{repo}` | Disconnect and delete its intents |
+| GET | `/api/repos/{owner}/{repo}/changes` | Files modified since last sync + affected intents (read-only) |
+| POST | `/api/repos/{owner}/{repo}/sync` | Accept current head; flags intents on modified files `stale` |
+| GET | `/api/repos/{owner}/{repo}/activity` | File changes received by the webhook |
+| GET | `/api/repos/{owner}/{repo}/intents?stale=&source_file=` | List intent nodes |
+| GET/PUT/DELETE | `/api/repos/{owner}/{repo}/intents/{node_id}` | Read / upsert / delete one node. PUT takes `?expected_version=` and returns 409 on a conflicting edit |
+| GET/PUT | `/api/repos/{owner}/{repo}/graph` | Whole IntentGraph; PUT replaces it (for the intent engine) |
+| POST | `/api/repos/{owner}/{repo}/intents/export` | Commit the graph to `.intentflow/intent_graph.json` on branch `intentflow/intents` |
+| POST | `/webhooks/github` | GitHub push webhook (HMAC-verified) |
 
-The GitHub access token stays on the backend (in-memory session store); the
-browser only holds an opaque httpOnly session cookie. Other services can
-protect routes with `Depends(require_session)` from `app.auth` and use
-`session.access_token` to call GitHub.
+Intent nodes follow the `IntentNode` schema in CONTEXT.md. `downstream_dependencies`
+become `depends_on` edges automatically. Saving a node clears its `stale` flag.
+
+### Push webhook (optional)
+GitHub must reach your backend, so locally run `ngrok http 8000`, then in the repo's
+**Settings → Webhooks → Add webhook** use `https://<ngrok-host>/webhooks/github`,
+content type `application/json`, and the same secret as `GITHUB_WEBHOOK_SECRET`.
+Without a webhook, **sync repo** still finds every change through the compare API.
+
+### Tests
+```bash
+cd backend
+pip install -r requirements-dev.txt
+python -m pytest
+```
+
+The GitHub access token stays on the backend; the browser only holds an opaque
+httpOnly session cookie.
