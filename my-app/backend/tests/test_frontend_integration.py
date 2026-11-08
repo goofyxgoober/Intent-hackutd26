@@ -190,3 +190,89 @@ def test_session_persistence_across_memory_wipe():
     assert res_tree.status_code == 200
     assert "tenets" in res_tree.json()
 
+
+def test_rich_ast_annotation_generation():
+    """Verify that generate_annotations_for_file extracts real AST classes, methods, and chunk comments."""
+    from app.pipeline import generate_annotations_for_file
+
+    sample_code = '''
+"""Vector similarity client for Pinecone indexes."""
+from typing import List
+import numpy as np
+
+def content_hash(text: str) -> str:
+    """Deterministic 8-character hash."""
+    return "abcdef12"
+
+class VectorDBManager:
+    """Manages Pinecone index operations."""
+    def __init__(self, index_name: str):
+        self.index_name = index_name
+
+    def query_similar_paragraph(self, vector: List[float], top_k: int = 5):
+        """Query Pinecone for matching document paragraphs."""
+        return []
+'''
+    annot = generate_annotations_for_file("src/services/pinecone_client.py", sample_code)
+    summary = annot["summary"]
+
+    assert "Vector similarity client" in summary["purpose"]
+    assert any("query_similar_paragraph" in r for r in summary["responsibilities"])
+    assert any("content_hash" in r for r in summary["responsibilities"])
+    assert "numpy" in summary["dependencies"]
+    assert len(annot["chunks"]) >= 2
+    assert any("VectorDBManager" in c["comment"] for c in annot["chunks"])
+
+
+def test_interactive_grilling_and_chatbot_flow():
+    """Verify interactive tenet grilling via direct API endpoints and the chatbot /ask bridge."""
+    from app import db, sessions
+    from app.config import settings
+
+    # Setup authenticated client
+    user = {"id": 8888, "login": "grill-tester", "avatar_url": "https://example.com/avatar.png"}
+    user_id = db.upsert_user(user["id"], user["login"])
+    sid = sessions.create_session("dev_token", user, user_id)
+    auth_client = TestClient(app, cookies={settings.session_cookie: sid})
+
+    # Connect repository
+    r_conn = auth_client.post("/api/repos/test-team/superdoc-repo/connect")
+    assert r_conn.status_code == 200
+
+    # Start grilling session
+    r_start = auth_client.post("/api/repos/test-team/superdoc-repo/grill/start")
+    assert r_start.status_code == 200
+    grill_data = r_start.json()
+    assert grill_data["questions_count"] == 3
+    first_q = grill_data["questions"][0]
+    assert "text" in first_q
+    assert len(first_q["options"]) >= 2
+
+    # Check status endpoint
+    r_status = auth_client.get("/api/repos/test-team/superdoc-repo/grill")
+    assert r_status.status_code == 200
+    status_data = r_status.json()
+    assert status_data["active"] is True
+    assert status_data["total_questions"] == 3
+
+    # Answer question 1 via option choice "A"
+    r_ans = auth_client.post("/api/repos/test-team/superdoc-repo/grill/answer", json={
+        "answer": "A",
+        "question_id": first_q["id"]
+    })
+    assert r_ans.status_code == 200
+    ans_data = r_ans.json()
+    assert ans_data["ok"] is True
+    assert ans_data["candidate_invariant"] is not None
+    assert ans_data["next_question"] is not None
+    assert ans_data["answered_count"] == 1
+
+    # Chatbot interaction: answering question 2 via POST /api/repos/{repo}/ask
+    r_chat = client.post("/api/repos/test-team/superdoc-repo/ask", json={
+        "question": "Option B"
+    })
+    assert r_chat.status_code == 200
+    chat_resp = r_chat.json()
+    assert "Answer Recorded" in chat_resp["answer"] or "Question" in chat_resp["answer"]
+
+

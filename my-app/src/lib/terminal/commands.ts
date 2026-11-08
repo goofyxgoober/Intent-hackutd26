@@ -323,6 +323,119 @@ export const commands: Command[] = [
     },
   },
   {
+    name: "grill",
+    aliases: ["interview", "questions"],
+    usage: "grill [start|answer <text>|skip]",
+    summary: "interactive tenet grilling interview to define and refine invariants",
+    offline: true,
+    async run(args, ctx) {
+      const sub = (args[0] ?? "").toLowerCase();
+      const repoUrl = `/api/repos/${ctx.repo}`;
+
+      if (sub === "answer" || sub === "ans") {
+        const text = args.slice(1).join(" ").trim();
+        if (!text) return ctx.print("  usage: grill answer <A|B|C or custom requirement>", "muted");
+        ctx.print(`  recording answer: "${text}"…`, "muted");
+        try {
+          const res = await fetch(`${repoUrl}/grill/answer`, {
+            method: "POST",
+            headers: { "Content-Type": "application/json" },
+            body: JSON.stringify({ answer: text }),
+          }).then((r) => r.json());
+
+          if (res.error) return ctx.print(`  grill error: ${res.error}`, "error");
+
+          ctx.print(`  ✓ recorded: "${res.recorded_answer}" for ${res.tenet_name}`, "success");
+          if (res.candidate_invariant) {
+            ctx.print(`  + synthesized invariant: ${res.candidate_invariant}`, "accent");
+          }
+          if (res.next_question) {
+            const nq = res.next_question;
+            ctx.print([
+              `  --- Next Question (${res.answered_count + 1}/${res.total_questions}) ---`,
+              `  ${nq.text}`,
+              `  Why: ${nq.why}`,
+              ...(nq.options ?? []).map((o: string, i: number) => `    [${String.fromCharCode(65 + i)}] ${o}`),
+              `  To answer: type "grill answer <A|B|C or requirement>" or chat directly`,
+            ]);
+          } else {
+            ctx.print(`  🎉 Grilling complete for ${res.tenet_name}! Run "tenets" to inspect the hierarchy.`, "success");
+          }
+          await ctx.sync();
+        } catch (e) {
+          ctx.print(`  grill error: ${e instanceof Error ? e.message : String(e)}`, "error");
+        }
+        return;
+      }
+
+      if (sub === "skip") {
+        ctx.print("  skipping current question…", "muted");
+        try {
+          const res = await fetch(`${repoUrl}/grill/answer`, {
+            method: "POST",
+            headers: { "Content-Type": "application/json" },
+            body: JSON.stringify({ answer: "[SKIPPED]", dont_know: true }),
+          }).then((r) => r.json());
+          if (res.next_question) {
+            const nq = res.next_question;
+            ctx.print([
+              `  Next Question (${res.answered_count + 1}/${res.total_questions}): ${nq.text}`,
+              ...(nq.options ?? []).map((o: string, i: number) => `    [${String.fromCharCode(65 + i)}] ${o}`),
+            ]);
+          } else {
+            ctx.print("  grilling complete for this tenet.", "success");
+          }
+        } catch (e) {
+          ctx.print(`  grill error: ${e instanceof Error ? e.message : String(e)}`, "error");
+        }
+        return;
+      }
+
+      if (sub === "start") {
+        ctx.print(`  starting tenet grilling for ${ctx.repo}…`, "muted");
+        try {
+          const res = await fetch(`${repoUrl}/grill/start`, { method: "POST" }).then((r) => r.json());
+          if (res.questions && res.questions[0]) {
+            const q = res.questions[0];
+            ctx.print([
+              `  🔥 Tenet Grilling Session Started: ${res.tenet_name ?? "System"}`,
+              `  Question 1/${res.questions.length}:`,
+              `  ${q.text}`,
+              `  Why: ${q.why}`,
+              ...(q.options ?? []).map((o: string, i: number) => `    [${String.fromCharCode(65 + i)}] ${o}`),
+              `  To answer: type "grill answer <A|B|C or text>" or chat directly`,
+            ]);
+          }
+        } catch (e) {
+          ctx.print(`  grill error: ${e instanceof Error ? e.message : String(e)}`, "error");
+        }
+        return;
+      }
+
+      // Default: fetch current status
+      try {
+        const res = await fetch(`${repoUrl}/grill`).then((r) => r.json());
+        if (!res.active || !res.current_question) {
+          ctx.print([
+            `  ${res.message || "No active questions."}`,
+            '  Type "grill start" to start an interactive tenet grilling session.',
+          ]);
+          return;
+        }
+        const q = res.current_question;
+        ctx.print([
+          `  🔥 Tenet Grilling Active: ${res.tenet_name} (Question ${res.answered_count + 1}/${res.total_questions})`,
+          `  ${q.text}`,
+          `  Why: ${q.why}`,
+          ...(q.options ?? []).map((o: string, i: number) => `    [${String.fromCharCode(65 + i)}] ${o}`),
+          `  To answer: type "grill answer <choice or requirement>" or chat directly`,
+        ]);
+      } catch (e) {
+        ctx.print(`  grill error: ${e instanceof Error ? e.message : String(e)}`, "error");
+      }
+    },
+  },
+  {
     name: "clear",
     usage: "clear",
     summary: "clear the terminal",
@@ -350,23 +463,47 @@ export async function execute(raw: string, ctx: CommandContext): Promise<void> {
     return;
   }
 
-  if (args.length === 0 && !raw.endsWith("?")) {
+  const vLower = verb.toLowerCase();
+  const isChoiceOrGrill =
+    ["a", "b", "c", "1", "2", "3", "option", "choice", "answer"].includes(vLower) ||
+    vLower.startsWith("option") ||
+    vLower.startsWith("[") ||
+    vLower.startsWith("(");
+
+  if (args.length === 0 && !raw.endsWith("?") && !isChoiceOrGrill) {
     return ctx.print(`  command not found: ${verb}. Type "help" for available commands.`, "error");
   }
 
-  // Natural-language question
-  if (!ctx.index) return ctx.print("  graph not loaded yet", "error");
-  const f = await ctx.query(raw);
-  if (!f || !f.nodeIds.size) return ctx.print("  no intent nodes matched that question", "error");
-  printFocus(ctx, f);
+  // Natural-language question or grilling reply
+  let f: Focus | null = null;
+  if (ctx.index) {
+    try {
+      f = await ctx.query(raw);
+    } catch {
+      /* ignore retrieval errors */
+    }
+  }
+
+  if (f && f.nodeIds.size > 0) {
+    printFocus(ctx, f);
+  }
+
   if (!ctx.source.ask) {
+    if (!f || !f.nodeIds.size) {
+      return ctx.print("  no intent nodes matched that question and agent not connected", "error");
+    }
     ctx.print("  agent not connected · context is ready (run `context` to view it)", "muted");
     return;
   }
+
   try {
     ctx.print("  asking agent…", "muted");
-    const reply = await ctx.source.ask(ctx.repo, raw, `[UI SELECTION] ${JSON.stringify(ctx.selection)}\n${f.context}`);
+    const contextPayload = f?.context ? `[UI SELECTION] ${JSON.stringify(ctx.selection)}\n${f.context}` : `[UI SELECTION] ${JSON.stringify(ctx.selection)}`;
+    const reply = await ctx.source.ask(ctx.repo, raw, contextPayload);
     ctx.print(reply.answer.split("\n").map((l) => `  ${l}`));
+    if (reply.answer.includes("Answer Recorded") || reply.answer.includes("Grilling Complete")) {
+      await ctx.sync();
+    }
   } catch (e) {
     ctx.print(`  agent error: ${e instanceof Error ? e.message : String(e)}`, "error");
   }

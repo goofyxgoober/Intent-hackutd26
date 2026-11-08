@@ -5,6 +5,7 @@ from typing import Optional
 
 import json
 from fastapi import APIRouter, Depends, HTTPException, Response, WebSocket, WebSocketDisconnect
+from pydantic import BaseModel
 
 from . import db, events, graph_view, sync
 from .auth import require_session
@@ -159,6 +160,39 @@ async def run_repo_pipeline(repo: ConnectedRepo = Depends(connected_repo)) -> di
     )
     events.emit(repo.id, "graph.refresh")
     return result
+
+
+class GrillAnswerRequest(BaseModel):
+    answer: str
+    question_id: Optional[str] = None
+    dont_know: bool = False
+
+
+class GrillStartRequest(BaseModel):
+    tenet_id: Optional[str] = None
+
+
+@router.get("/{owner}/{repo}/grill")
+def repo_grill_status(repo: ConnectedRepo = Depends(connected_repo)) -> dict:
+    """Get active tenet grilling state and unanswered questions."""
+    from . import grill
+    return grill.get_grill_status(repo.id)
+
+
+@router.post("/{owner}/{repo}/grill/answer")
+def repo_grill_answer(body: GrillAnswerRequest, repo: ConnectedRepo = Depends(connected_repo)) -> dict:
+    """Submit an answer to the current tenet grilling question (verbatim, synthesizing invariant)."""
+    from . import grill
+    return grill.submit_grill_answer(repo.id, body.answer, body.question_id, body.dont_know)
+
+
+@router.post("/{owner}/{repo}/grill/start")
+def repo_grill_start(body: Optional[GrillStartRequest] = None, repo: ConnectedRepo = Depends(connected_repo)) -> dict:
+    """Start or reset interactive tenet grilling session."""
+    from . import grill
+    tid = body.tenet_id if body else None
+    return grill.start_grill_session(repo.id, tenet_id=tid)
+
 
 
 # ---------------------------------------------------------------- intent graph for the Codebase view

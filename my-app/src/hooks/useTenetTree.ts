@@ -112,6 +112,8 @@ export function useTenetTree(source: GraphSource, repo: string, enabled: boolean
     if (e.type === "flag.raised") setNotice(`⚑ ${String(e.kind).replace(/_/g, " ")} on ${String(e.claim_id)}: ${String(e.reason ?? "")}`);
     else if (e.type === "sync.batch") setNotice("⇣ new commits synced: tenet tree refreshed");
     else if (e.type === "jev.verdict") setNotice(`jev → ${String(e.verdict)} (${String(e.confidence)})`);
+    else if (e.type === "grill.question") setNotice(`🔥 Tenet grilling active for "${String(e.tenet_name ?? 'System')}": ${String(e.question_text ?? 'Questions ready (type "grill")')}`);
+    else if (e.type === "grill.done") setNotice(`✓ Grilling complete for "${String(e.tenet_name ?? 'tenet')}"`);
     void reload();
   });
 

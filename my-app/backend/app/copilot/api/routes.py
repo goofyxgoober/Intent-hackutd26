@@ -385,6 +385,34 @@ async def get_session_messages(
 # Frontend Visualizer Contract Bridges (Vishjit / httpSource.ts integration)
 # ---------------------------------------------------------------------------
 
+def find_workspace_id_for_repo(repo_str: str) -> Optional[int]:
+    """Finds the workspace ID in the SQLite repos table for a given repo string."""
+    try:
+        from app import db
+        with db.connect() as conn:
+            # 1. Exact match on full_name
+            row = conn.execute("SELECT id FROM repos WHERE full_name = ? COLLATE NOCASE", (repo_str,)).fetchone()
+            if row:
+                return row["id"]
+            # 2. Ends with repo_str
+            if "/" in repo_str:
+                name = repo_str.split("/")[-1]
+                row = conn.execute("SELECT id FROM repos WHERE full_name LIKE ? COLLATE NOCASE", (f"%/{name}",)).fetchone()
+                if row:
+                    return row["id"]
+            else:
+                row = conn.execute("SELECT id FROM repos WHERE full_name LIKE ? COLLATE NOCASE", (f"%/{repo_str}",)).fetchone()
+                if row:
+                    return row["id"]
+            # 3. Fallback to latest connected repo
+            row = conn.execute("SELECT id FROM repos ORDER BY id DESC LIMIT 1").fetchone()
+            if row:
+                return row["id"]
+    except Exception:
+        pass
+    return None
+
+
 @router.post("/repos/{repo:path}/ask", response_model=FrontendAskResponse)
 async def frontend_ask(
     repo: str,
@@ -394,7 +422,91 @@ async def frontend_ask(
     """
     Bridge for Vishjit's frontend Terminal & Graph Visualizer:
     Called when a user types a natural-language query in the Terminal.
+    Supports interactive Tenet Grilling interviews back-and-forth as well as architecture copilot questions.
     """
+    ws_id = find_workspace_id_for_repo(repo)
+    if ws_id:
+        try:
+            from app import grill
+            q_clean = body.question.strip().lower()
+            grill_status = grill.get_grill_status(ws_id)
+
+            # Check if user explicitly asked for grilling
+            is_grill_prompt = any(
+                k in q_clean for k in ["grill", "interview", "start grill", "tenet question", "build tenet", "build tenets", "ask me questions"]
+            )
+
+            # Check if user is answering an active question
+            is_answering = False
+            if grill_status.get("active") and grill_status.get("current_question"):
+                # Option selection e.g. "a", "option a", "[b]", "1", "c", etc.
+                choice_tokens = ["a", "b", "c", "1", "2", "3", "option a", "option b", "option c", "[a]", "[b]", "[c]", "(a)", "(b)", "(c)"]
+                if (
+                    q_clean in choice_tokens
+                    or any(q_clean.startswith(f"{t} ") or q_clean.startswith(f"{t}:") for t in choice_tokens)
+                    or q_clean.startswith(("answer:", "choice:", "select:", "we should", "i choose"))
+                    or any(k in q_clean for k in ["skip", "don't know", "dont know"])
+                ):
+                    is_answering = True
+
+            if is_answering:
+                dont_know = any(k in q_clean for k in ["skip", "don't know", "dont know"])
+                res = grill.submit_grill_answer(ws_id, body.question, dont_know=dont_know)
+                if "error" not in res:
+                    reply_lines = [
+                        f"✅ **Answer Recorded for {res.get('tenet_name', 'Tenet')}**",
+                        f"*Decision:* \"{res['recorded_answer']}\"",
+                    ]
+                    if res.get("candidate_invariant"):
+                        reply_lines.append(f"*Synthesized Invariant:* `{res['candidate_invariant']}`")
+                    reply_lines.append("\n---\n")
+
+                    if res.get("next_question"):
+                        nq = res["next_question"]
+                        q_num = res.get("answered_count", 1) + 1
+                        total = res.get("total_questions", 3)
+                        reply_lines.extend([
+                            f"### Question {q_num}/{total}:",
+                            f"**{nq['text']}**\n",
+                            f"*Why this matters:* {nq['why']}\n",
+                            "**Options:**",
+                        ])
+                        for i, opt in enumerate(nq.get("options", [])):
+                            letter = chr(65 + i)
+                            reply_lines.append(f"- **[{letter}]** {opt}")
+                        reply_lines.append("\n*(Reply with your choice, e.g. **'A'**, or type your custom requirement)*")
+                    else:
+                        reply_lines.extend([
+                            f"🎉 **Grilling Complete for {res.get('tenet_name', 'Tenet')}!**",
+                            "All architectural questions have been answered and compiled into the Tenet hierarchy.",
+                            "Candidate Axioms and Hypotheses are locked in the tree.",
+                            "Type `tenets` in the terminal to view the hierarchy, or run `grill <subsystem>` to drill down into a subsystem!",
+                        ])
+                    return FrontendAskResponse(answer="\n".join(reply_lines))
+
+            elif is_grill_prompt:
+                if not grill_status.get("active"):
+                    grill.start_grill_session(ws_id)
+                    grill_status = grill.get_grill_status(ws_id)
+
+                if grill_status.get("current_question"):
+                    cq = grill_status["current_question"]
+                    q_num = grill_status.get("answered_count", 0) + 1
+                    total = grill_status.get("total_questions", 3)
+                    reply_lines = [
+                        f"🔥 **Tenet Grilling Active: {grill_status.get('tenet_name', 'System')}** (Question {q_num}/{total})\n",
+                        f"### {cq['text']}\n",
+                        f"*Why this matters:* {cq['why']}\n",
+                        "**Options:**",
+                    ]
+                    for i, opt in enumerate(cq.get("options", [])):
+                        letter = chr(65 + i)
+                        reply_lines.append(f"- **[{letter}]** {opt}")
+                    reply_lines.append("\n*(Reply with your choice, e.g. **'A'**, or type your custom requirement)*")
+                    return FrontendAskResponse(answer="\n".join(reply_lines))
+        except Exception:
+            pass
+
     user_prompt = body.question
     if body.context:
         user_prompt = f"Context from Intent Graph:\n{body.context}\n\nUser Question:\n{body.question}"
