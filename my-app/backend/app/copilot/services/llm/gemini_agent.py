@@ -4,10 +4,11 @@ import time
 import re
 from typing import Dict, List, Optional, Any
 from dotenv import load_dotenv
+from pathlib import Path
 
 PRONOUN_RE = re.compile(r"\b(it|its|that|this|those|them|they)\b")
 
-load_dotenv()
+load_dotenv(Path(__file__).resolve().parents[4] / ".env", override=True)
 
 from app.copilot.core.interfaces import BaseLLMAgent, BaseGraphStore
 from app.copilot.models.schemas import (
@@ -41,7 +42,7 @@ STYLE & RULES:
 - Be concise, architecturally rigorous, and action-oriented.
 - Highlight business invariants using bold formatting.
 - When generating code or tests, ensure assertions directly enforce business invariants.
-- Emphasize token reduction (IntentFlow achieves ~85%+ token savings vs naive raw-syntax RAG).
+- Never state latency, token counts, or percentage savings; those are measured and displayed separately.
 """
 
     def __init__(
