@@ -29,6 +29,8 @@ and the intent engine package (`intentflow/`).
 Sign-in is GitHub OAuth. GitHub asks for the user's 2FA code during login, and the
 backend also rejects any account that doesn't have 2FA turned on
 (`REQUIRE_GITHUB_2FA=true`, the default). Set it to `false` for test accounts.
+If 2FA is off, the login page says `2fa_required`; if GitHub didn't report the status at all, it
+says `2fa_unknown`. Every failed sign-in is also logged in the backend terminal with the reason.
 
 ## Intent engine backend (spec: IntentFlow Intent Engine Specification)
 
@@ -80,6 +82,17 @@ folders mirroring ownership and `results/` gitignored. It never writes to the de
 | GET | `/inbox`, `/changelog`, `/history?kind=` | all | Review inbox, decision log, snapshots |
 | POST | `/export` | user | Commit the intent folder to `intentflow/intents` |
 | WS | `/ws/workspaces/{id}` | all (`?key=` for agents) | Live events: `tenet.*`, `claim.*`, `result.appended`, `sync.batch`, `jev.verdict`, ... |
+
+### Errors
+Every error response is `{"detail": ..., "code": "..."}`. Codes the chat layer branches on:
+`AXIOM_LOCKED`, `NOT_VERIFIED`, `DEPENDENCY_NOT_READY` (`detail.blockers` lists the Claims),
+`PERMISSION_DENIED`, `UNAUTHENTICATED`, `NOT_FOUND`, `VALIDATION`, `CONFLICT`,
+`CONFIRMATION_REQUIRED` (Axiom hand edit without the warning acknowledged), `RATE_LIMITED`, `GITHUB_ERROR`.
+
+### Live events
+`flag.raised` (`claim_id`, `tenet_id`, `status`, `kind`, `reason`) fires whenever a Claim is
+flagged: a failing Axiom test, a Jev conflict, or a demoted or edited dependency. Nothing changes
+automatically; the user decides.
 
 ### Git sync
 **Polling (default, works locally):** while you have a repo open, the backend checks its default

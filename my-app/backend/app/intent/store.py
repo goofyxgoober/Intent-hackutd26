@@ -24,6 +24,7 @@ from typing import Dict, Iterable, List, Optional, Set
 from fastapi import HTTPException
 
 from ..actors import Actor
+from ..errors import EngineError
 from ..config import settings
 from .. import events
 
@@ -54,12 +55,12 @@ def content_hash(claim: dict) -> str:
     return hashlib.sha256(body.encode()).hexdigest()
 
 
-def forbid(message: str) -> HTTPException:
-    return HTTPException(403, message)
+def forbid(message: str, code: str = "PERMISSION_DENIED") -> HTTPException:
+    return EngineError(403, message, code)
 
 
-def conflict(message: str, **extra) -> HTTPException:
-    return HTTPException(409, {"message": message, **extra} if extra else message)
+def conflict(message: str, code: str = "CONFLICT", **extra) -> HTTPException:
+    return EngineError(409, {"message": message, **extra} if extra else message, code)
 
 
 def safe_repo_path(path: str) -> str:
@@ -554,8 +555,9 @@ class IntentStore:
             c = self.claim(cid)
             if c["status"] == AXIOM:
                 if actor.is_user:
-                    raise conflict("This is an Axiom. Edit it by hand through the Axiom edit flow (with its warning), or demote it first.")
-                raise forbid("Agents never edit Axioms. The user must demote it first.")
+                    raise conflict("This is an Axiom. Edit it by hand through the Axiom edit flow (with its warning), "
+                                   "or demote it first.", code="AXIOM_LOCKED")
+                raise forbid("Agents never edit Axioms. The user must demote it first.", code="AXIOM_LOCKED")
             if c["status"] == SCRAPPED:
                 raise conflict("This Claim was scrapped; remake it instead")
             if fields.get("dependencies") is not None:
@@ -630,6 +632,9 @@ class IntentStore:
         c = self.claim(cid)
         c["flags"].append({"kind": kind, "detail": detail, "at": _now()})
         self._write(self._path("claims", c["tenet_id"], f"{cid}.json"), c)
+        # Always surfaced to the user (chat contract 5, spec 11.6): nothing changes automatically.
+        self._emit("flag.raised", claim_id=cid, tenet_id=c["tenet_id"], status=c["status"],
+                   kind=kind, reason=detail)
 
     def clear_flag(self, actor: Actor, cid: str, kind: str) -> dict:
         if not actor.is_user:
@@ -653,13 +658,15 @@ class IntentStore:
             unmet = [d for d in c["dependencies"]
                      if claims[d]["status"] != AXIOM and self.summarize_result(claims[d])["verdict"] != "pass"]
             if unmet:
-                raise conflict("Promotion is bottom-up: lock or pass these dependencies first", unmet=unmet)
+                raise conflict("Promotion is bottom-up: lock or pass these dependencies first",
+                               code="DEPENDENCY_NOT_READY", unmet=unmet, blockers=unmet)
             result = self.summarize_result(c)
             verified = result["verdict"] == "pass" and not result["flaky"]
             if not verified and not accept_without_verification:
                 raise conflict(
                     "Promotion needs a passing, non-flaky result for the current wording, "
                     "or accept_without_verification=true",
+                    code="NOT_VERIFIED",
                     result=result,
                 )
             previous = [h for h in self.history("axiom_versions") if h["id"] == cid]
@@ -706,7 +713,7 @@ class IntentStore:
             claims = self.claims()
             c = claims.get(cid) or self.claim(cid)
             if c["status"] == AXIOM:
-                raise conflict("Axioms are never scrapped directly. Demote it first.")
+                raise conflict("Axioms are never scrapped directly. Demote it first.", code="AXIOM_LOCKED")
             if c["status"] == SCRAPPED:
                 raise conflict("Already scrapped")
             c["status"] = SCRAPPED
