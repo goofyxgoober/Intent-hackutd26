@@ -7,6 +7,6 @@ __pycache__/
 *.tsbuildinfo
 
 *.db
-data/
 backend/data/
+data/
 .pytest_cache/
