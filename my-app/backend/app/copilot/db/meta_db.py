@@ -1,8 +1,12 @@
+import os
 from pathlib import Path
 from sqlalchemy import create_engine, event
 from sqlalchemy.orm import DeclarativeBase, sessionmaker
 
-_DB_PATH = Path(__file__).resolve().parents[3] / "meta.db"
+_DEFAULT_DB_DIR = Path(__file__).resolve().parents[3]
+_DB_DIR = Path(os.getenv("CHAT_DB_DIR", str(_DEFAULT_DB_DIR)))
+_DB_PATH = _DB_DIR / "meta.db"
+_DB_DIR.mkdir(parents=True, exist_ok=True)
 
 
 class MetaBase(DeclarativeBase):
