@@ -186,8 +186,39 @@ def _humanize(segment: str) -> str:
     return " ".join(w if w.isupper() else w.capitalize() for w in words) or segment
 
 
-def _structural_split(paths: List[str]) -> List[Tuple[str, List[str]]]:
-    """Split files into parts by the first folder level where they diverge, else file by file."""
+GENERIC_FOLDERS = {"src", "lib", "app", "source", "sources", "pkg", "internal", "main", "core", "common", "code"}
+CODE_EXTENSIONS = {
+    ".py", ".ts", ".tsx", ".js", ".jsx", ".mjs", ".cjs", ".go", ".rs", ".java", ".kt", ".scala", ".rb", ".php",
+    ".cs", ".c", ".h", ".cc", ".cpp", ".hpp", ".swift", ".m", ".sql", ".sh", ".vue", ".svelte", ".dart", ".ex", ".exs",
+}
+
+
+def is_code(path: str) -> bool:
+    return os.path.splitext(path)[1].lower() in CODE_EXTENSIONS
+
+
+def _part_name(segment: str, parent_name: str, is_folder: bool) -> str:
+    """A folder called src or lib says nothing about functionality; name it after its parent."""
+    if is_folder and segment.lower() in GENERIC_FOLDERS:
+        return f"{parent_name} core" if parent_name else "Core"
+    return _humanize(segment)
+
+
+def _structural_split(paths: List[str], parent_name: str = "") -> List[Tuple[str, List[str]]]:
+    """Split files into parts by the first folder level where they diverge, else file by file.
+
+    Only code becomes its own part; config and docs files join the largest part next to them.
+    """
+    code = [p for p in paths if is_code(p)]
+    other = [p for p in paths if not is_code(p)]
+    parts = _split_code(code, parent_name)
+    if parts and other:
+        biggest = max(range(len(parts)), key=lambda i: len(parts[i][1]))
+        parts[biggest] = (parts[biggest][0], sorted(parts[biggest][1] + other))
+    return parts
+
+
+def _split_code(paths: List[str], parent_name: str) -> List[Tuple[str, List[str]]]:
     if len(paths) < 2:
         return []
     split_paths = [p.split("/") for p in paths]
@@ -198,13 +229,13 @@ def _structural_split(paths: List[str]) -> List[Tuple[str, List[str]]]:
             depth += 1
             continue
         break
-    groups: "OrderedDict[str, List[str]]" = OrderedDict()
+    groups: "OrderedDict[Tuple[str, bool], List[str]]" = OrderedDict()
     for p, sp in sorted(zip(paths, split_paths)):
-        key = sp[depth] if len(sp) > depth + 1 else sp[-1]
-        groups.setdefault(key, []).append(p)
+        is_folder = len(sp) > depth + 1
+        groups.setdefault((sp[depth] if is_folder else sp[-1], is_folder), []).append(p)
     if len(groups) < 2:
         return []
-    parts = [(_humanize(k), v) for k, v in groups.items()]
+    parts = [(_part_name(k, parent_name, folder), v) for (k, folder), v in groups.items()]
     if len(parts) > MAX_CHILDREN:  # keep the biggest groups, fold the rest together
         parts.sort(key=lambda kv: -len(kv[1]))
         keep, rest = parts[: MAX_CHILDREN - 1], parts[MAX_CHILDREN - 1:]
@@ -234,7 +265,7 @@ def generate_questions_for_tenet(store: IntentStore, tenets: Dict[str, dict], ti
     t = tenets[tid]
     level = IntentStore.level(tenets, tid)
     paths = _scope_files(store, tenets, tid)
-    can_split = not t["children"] and level < max_depth() and len(paths) > 1
+    can_split = not t["children"] and level < max_depth() and len([p for p in paths if is_code(p)]) > 1
     parent = tenets.get(t.get("parent_id") or "")
 
     data = _llm_json(SYSTEM_PROMPT, f"""Tenet to define: "{t['name']}" (level {level}: {level_name(level)}).
@@ -272,7 +303,7 @@ JSON: {{"draft": "...", "questions": [{{"text": "...", "why": "...", "options": 
         ["Yes, that's right", "Partly; I'll type the correction", "No; I'll describe it"],
     )]
     if can_split:
-        parts = _structural_split(paths)
+        parts = _structural_split(paths, t["name"])
         if parts:
             questions.append(_question(
                 f"I'd split {t['name']} into {len(parts)} parts: {', '.join(n for n, _ in parts)}. Does that match how it works?",
@@ -298,8 +329,11 @@ def _apply_children(store: IntentStore, tid: str, parts: List[Tuple[str, str, Li
     created = []
     existing = {store.tenet(c)["name"].lower() for c in store.tenet(tid)["children"]}
     for name, functionality, paths in parts:
-        if name.lower() in existing:
-            continue
+        if name.lower() in existing:  # never drop a part (and its files) over a name clash
+            hint = posixpath.dirname(paths[0]) if paths else ""
+            name = f"{name} ({hint or len(existing) + 1})"
+            if name.lower() in existing:
+                name = f"{name} {len(existing) + 1}"
         child = store.create_tenet(BUILDER, name[:200], functionality, tid, [], {"via": "grilling"})
         if paths:
             store.set_links(ENGINE, child["id"], [{"path": p} for p in paths])
@@ -319,7 +353,7 @@ def finalize_tenet(workspace_id: int, state: dict) -> dict:
     level = IntentStore.level(tenets, tid)
     paths = _scope_files(store, tenets, tid)
     already_split = bool(t["children"])
-    can_split = not already_split and level < max_depth() and len(paths) > 1
+    can_split = not already_split and level < max_depth() and len([p for p in paths if is_code(p)]) > 1
     answered = [q for q in state["questions"] if q.get("answer") and not q.get("dont_know")]
     qa = "\n".join(f"- Q: {q['text']}\n  A: {q['answer']}" for q in answered) or "- (the developer did not know)"
 
@@ -371,14 +405,18 @@ JSON: {{"functionality": "...", "hypotheses": [{{"statement": "...", "test_expla
             functionality = first["answer"]  # the developer's own correction, verbatim
         else:
             functionality = state.get("draft") or functionality
+            if first and first.get("answer") == (first.get("options") or [None])[0]:  # "Yes, that's right"
+                functionality = re.sub(r"^Draft:\s*|\s*Grilling confirms or corrects this\.?$", "", functionality).strip()
         for q in state["questions"]:
-            if q.get("answer") and not q.get("dont_know") and q["text"].startswith("What must "):
+            # A rule needs real words; a stray "A" or "yes" is not a Hypothesis.
+            if (q.get("answer") and not q.get("dont_know") and q["text"].startswith("What must ")
+                    and len(q["answer"].split()) >= 3):
                 hypotheses.append({"statement": q["answer"],
                                    "test_explanation": f"Checks that {t['name']} keeps this rule, as stated by the developer."})
         if can_split:
             split_q = next((q for q in state["questions"] if q["text"].startswith(f"I'd split {t['name']}")), None)
             if not (split_q and split_q.get("answer", "").lower().startswith("no")):
-                parts = [(n, _describe(store, n, ps), ps) for n, ps in _structural_split(paths)]
+                parts = [(n, _describe(store, n, ps), ps) for n, ps in _structural_split(paths, t["name"])]
 
     if functionality and functionality != t.get("functionality"):
         store.update_tenet(BUILDER, tid, {"functionality": functionality})

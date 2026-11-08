@@ -12,6 +12,8 @@ FILES = [
     "src/db/user.py",
     "src/db/pool.py",
     "web/app.ts",
+    "web/src/api.ts",
+    "web/tsconfig.json",
 ]
 WS = 42
 
@@ -28,6 +30,8 @@ def store(tmp_path, monkeypatch):
     s.put_annotation(engine, "src/auth/session.py", {"summary": {"purpose": "Validates session tokens.",
                                                                  "invariants": ["Expired tokens are rejected"]}})
     pipeline.generate_requirements_and_tenets(s, {"files": [{"path": p} for p in FILES]}, "acme/legacy")
+    # files under a generic folder at the top level form a "Core" feature
+    s.put_imports({"head": "x", "files": [{"path": p, "size": 1, "language": "x"} for p in FILES], "edges": [], "external": []})
     return s
 
 
@@ -96,6 +100,13 @@ def test_answers_become_hypotheses_verbatim_without_fake_tests(store):
     assert claims[0]["status"] == "hypothesis"
     assert claims[0]["test_implementation"] == ""  # the Test Author writes real tests later
     assert claims[0]["provenance"]["via"] == "grilling"
+
+
+def test_one_word_replies_do_not_become_hypotheses(store):
+    grill.start_grill_session(WS)
+    grill.submit_grill_answer(WS, "A")    # confirms the draft
+    grill.submit_grill_answer(WS, "ok")   # not a rule
+    assert store.claims() == {}
 
 
 def test_typed_correction_replaces_the_draft(store):
@@ -175,3 +186,40 @@ def test_llm_drives_questions_and_split(store, monkeypatch):
 def test_old_session_files_are_ignored(store):
     grill.save_grill_state(WS, {"id": "old", "tenet_id": "t_x", "questions": []})
     assert grill.get_grill_status(WS)["active"] is False
+
+
+def test_rerunning_the_pipeline_keeps_grilling_progress(store):
+    grill.start_grill_session(WS)
+    grill.submit_grill_answer(WS, "A")
+    before = grill.get_grill_status(WS)
+    root = next(t["id"] for t in store.tenets().values() if not t["parent_id"])
+    resumed = pipeline.start_tenet_grilling_session(WS, store, root, "acme/legacy")
+    after = grill.get_grill_status(WS)
+    assert resumed["current_question"]["id"] == before["current_question"]["id"]
+    assert after["answered_count"] == 1
+    # an explicit restart still starts over
+    restarted = grill.start_grill_session(WS)
+    assert grill.get_grill_status(WS)["answered_count"] == 0 and restarted["level"] == 0
+
+
+def test_config_files_and_generic_folders_do_not_become_tenets(store):
+    grill.start_grill_session(WS)
+    answer_all()
+    tenets, _ = tree(store)
+    names = {t["name"] for t in tenets.values()}
+    assert "Tsconfig" not in names and "Src" not in names
+    web = next(t for t in tenets.values() if t["name"] == "Web")
+    kids = {tenets[c]["name"]: tenets[c] for c in web["children"]}
+    assert set(kids) == {"App", "Web core"}
+    # the config file stays covered, attached to the code next to it
+    covered = {l["path"] for k in kids.values() for l in k["code_links"]}
+    assert "web/tsconfig.json" in covered
+
+
+def test_confirmed_draft_loses_the_draft_label(store):
+    grill.start_grill_session(WS)
+    grill.submit_grill_answer(WS, "A")
+    grill.submit_grill_answer(WS, "ok")
+    root = next(t for t in store.tenets().values() if not t["parent_id"])
+    assert not root["functionality"].startswith("Draft:")
+    assert "Grilling confirms" not in root["functionality"]

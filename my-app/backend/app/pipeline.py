@@ -390,7 +390,8 @@ def classify_subsystem(grp: str, file_paths: List[str], repo_sources: Optional[D
     else:
         shown = ", ".join(sorted(file_paths)[:5])
         functionality = f"Code in {grp}/: {shown}{' and more' if len(file_paths) > 5 else ''}."
-    return _humanize(grp), functionality, []
+    name = "Core" if grp.lower() in ("src", "lib", "app", "source", "core", "main") else _humanize(grp)
+    return name, functionality, []
 
 
 def _name_features(store: IntentStore, repo_title: str, groups: Dict[str, List[str]]) -> Tuple[str, Dict[str, dict]]:
@@ -575,8 +576,15 @@ def generate_requirements_and_tenets(store: IntentStore, snapshot: dict, full_na
 
 
 def start_tenet_grilling_session(workspace_id: int, store: IntentStore, root_id: str, full_name: str) -> dict:
-    """Start tenet grilling process: generate questions, build GrillState, save session, emit grill.question."""
+    """Start grilling at the root, or carry on with a session that is already in progress.
+
+    The pipeline re-runs after syncs and whenever the UI refreshes; restarting here would wipe
+    the user's answers. Starting over is an explicit choice: POST .../grill/start.
+    """
     from . import grill
+    current = grill.load_grill_state(workspace_id)
+    if current and not current.get("done") and current.get("tenet_id") in store.tenets():
+        return grill._public(current)
     return grill.start_grill_session(workspace_id, tenet_id=root_id, full_name=full_name)
 
 
