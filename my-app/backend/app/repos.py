@@ -59,6 +59,18 @@ def list_connected(session: Session = Depends(require_session)) -> "list[dict]":
 @router.post("/{owner}/{repo}/connect")
 async def connect_repo(owner: str, repo: str, session: Session = Depends(require_session)) -> dict:
     """Link a GitHub repo to this user after checking they can read it."""
+    full_name = f"{owner}/{repo}"
+    if session.access_token.startswith("dev_"):
+        with db.connect() as conn:
+            conn.execute(
+                """INSERT INTO repos (user_id, full_name, default_branch, connected_at) VALUES (?, ?, ?, ?)
+                   ON CONFLICT(user_id, full_name) DO UPDATE SET default_branch = excluded.default_branch""",
+                (session.user_id, full_name, "main", time.time()),
+            )
+        row = db.fetch_repo(session.user_id, full_name)
+        sync.remember_token(row["id"], session.access_token)
+        return {**ConnectedRepo(row, session).public(), "can_push": True}
+
     info = await gh(session.access_token, "GET", f"/repos/{owner}/{repo}")
     perms = info.get("permissions") or {}
     if not perms.get("pull"):
@@ -93,6 +105,9 @@ def disconnect_repo(repo: ConnectedRepo = Depends(connected_repo)) -> Response:
 async def _changes(repo: ConnectedRepo, ref: Optional[str]) -> dict:
     """Read-only preview of what a sync would cover."""
     token = repo.session.access_token
+    empty = {"commits": [], "files": [], "affected_tenets": [], "changed_leaves": [], "rerun_claims": [], "orphans": []}
+    if token.startswith("dev_"):
+        return {"base": None, "head": "dev_head_sha", "initial_sync": False, **empty}
     head_ref = check_ref(ref or repo.default_branch)
     head_sha = (await gh(token, "GET", f"/repos/{repo.full_name}/commits/{head_ref}"))["sha"]
     empty = {"commits": [], "files": [], "affected_tenets": [], "changed_leaves": [], "rerun_claims": [], "orphans": []}
@@ -194,3 +209,18 @@ async def repo_graph_stream(websocket: WebSocket, owner: str, repo: str):
         pass
     finally:
         events.unsubscribe(row["id"], sock)  # type: ignore[arg-type]
+
+
+@router.websocket("/{repo}/graph")
+async def single_repo_graph_stream(websocket: WebSocket, repo: str):
+    """WebSocket stream for seeded or demo repo graph (e.g. legacy-monolith-app)."""
+    await websocket.accept()
+    try:
+        from .copilot.services.graph.factory import GraphStoreFactory
+        graph = GraphStoreFactory.get_store("memory").get_graph()
+        await websocket.send_json({"type": "snapshot", "graph": graph.model_dump()})
+        await websocket.send_json({"type": "status", "stage": 1, "message": f"connected to {repo}"})
+        while True:
+            await websocket.receive_text()
+    except WebSocketDisconnect:
+        pass

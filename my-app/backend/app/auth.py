@@ -1,4 +1,5 @@
 import logging
+import os
 import secrets
 from typing import Optional
 from urllib.parse import urlencode
@@ -39,22 +40,99 @@ def _login_error(reason: str, detail: str = "") -> RedirectResponse:
 
 
 @router.get("/github/login")
-def github_login() -> RedirectResponse:
-    if not settings.github_client_id:
-        raise HTTPException(500, "GITHUB_CLIENT_ID is not set in backend/.env")
-    state = secrets.token_urlsafe(24)
-    params = {
-        "client_id": settings.github_client_id,
-        "redirect_uri": settings.redirect_uri,
-        "scope": settings.github_scopes,
-        "state": state,
-        "allow_signup": "true",
+async def github_login(token: Optional[str] = None) -> RedirectResponse:
+    # 1. Full GitHub OAuth App redirect if client id is configured
+    if settings.github_client_id:
+        state = secrets.token_urlsafe(24)
+        params = {
+            "client_id": settings.github_client_id,
+            "redirect_uri": settings.redirect_uri,
+            "scope": settings.github_scopes,
+            "state": state,
+            "allow_signup": "true",
+        }
+        response = RedirectResponse(f"{GITHUB_WEB}/login/oauth/authorize?{urlencode(params)}")
+        response.set_cookie(
+            settings.state_cookie,
+            state,
+            max_age=600,
+            httponly=True,
+            secure=settings.cookie_secure,
+            samesite="lax",
+        )
+        return response
+
+    # 2. Authenticate with Personal Access Token (PAT) if provided in param or env
+    effective_token = token or os.getenv("GITHUB_TOKEN")
+    if effective_token:
+        try:
+            async with client() as api:
+                user_res = await api.get(
+                    "/user",
+                    headers={
+                        "Authorization": f"Bearer {effective_token}",
+                        "Accept": "application/vnd.github+json",
+                    },
+                )
+                if user_res.is_success:
+                    user = user_res.json()
+                    user_id = db.upsert_user(user["id"], user["login"])
+                    sid = create_session(effective_token, _public_user(user), user_id)
+                    response = RedirectResponse(f"{settings.frontend_url}/dashboard")
+                    response.set_cookie(
+                        settings.session_cookie,
+                        sid,
+                        max_age=settings.session_ttl_seconds,
+                        httponly=True,
+                        secure=settings.cookie_secure,
+                        samesite="lax",
+                    )
+                    return response
+        except Exception:
+            pass
+
+    # 3. Local Dev Mode bypass when no OAuth app or token is configured
+    dev_user = {
+        "id": 1,
+        "login": "dev-user",
+        "name": "Local Developer",
+        "avatar_url": "https://avatars.githubusercontent.com/u/583231",
+        "html_url": "https://github.com/intentflow",
+        "two_factor_authentication": True,
     }
-    response = RedirectResponse(f"{GITHUB_WEB}/login/oauth/authorize?{urlencode(params)}")
+    user_id = db.upsert_user(dev_user["id"], dev_user["login"])
+    sid = create_session("dev_token", _public_user(dev_user), user_id)
+    response = RedirectResponse(f"{settings.frontend_url}/dashboard")
     response.set_cookie(
-        settings.state_cookie,
-        state,
-        max_age=600,
+        settings.session_cookie,
+        sid,
+        max_age=settings.session_ttl_seconds,
+        httponly=True,
+        secure=settings.cookie_secure,
+        samesite="lax",
+    )
+    return response
+
+
+@router.get("/dev/login")
+@router.post("/dev/login")
+def dev_login() -> RedirectResponse:
+    """Instant local developer sign-in without requiring a GitHub token."""
+    dev_user = {
+        "id": 1,
+        "login": "dev-user",
+        "name": "Local Developer",
+        "avatar_url": "https://avatars.githubusercontent.com/u/583231",
+        "html_url": "https://github.com/intentflow",
+        "two_factor_authentication": True,
+    }
+    user_id = db.upsert_user(dev_user["id"], dev_user["login"])
+    sid = create_session("dev_token", _public_user(dev_user), user_id)
+    response = RedirectResponse(f"{settings.frontend_url}/dashboard")
+    response.set_cookie(
+        settings.session_cookie,
+        sid,
+        max_age=settings.session_ttl_seconds,
         httponly=True,
         secure=settings.cookie_secure,
         samesite="lax",

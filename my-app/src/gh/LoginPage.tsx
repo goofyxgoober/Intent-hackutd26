@@ -10,6 +10,8 @@ const ERROR_MESSAGES: Record<string, string> = {
   invalid_state: "oauth state mismatch — session expired, try again",
   token_exchange_failed: "could not exchange code for access token",
   user_fetch_failed: "signed in, but GET /user failed",
+  backend_offline: "FastAPI backend is offline — start it with 'npm run dev:api' on port 8000",
+  "GITHUB_CLIENT_ID is not set in backend/.env": "GITHUB_CLIENT_ID is not set in backend/.env",
   "2fa_unknown":
     "GitHub didn't report whether two-factor authentication is on for this account. if it is on, ask whoever runs the backend to set REQUIRE_GITHUB_2FA=false",
   "2fa_required":
@@ -50,8 +52,10 @@ export default function LoginPage() {
   const error = params.get("error");
 
   useEffect(() => {
-    if (!loading && user) router.replace("/dashboard");
-  }, [loading, user, router]);
+    if (!loading && user) {
+      window.location.href = "/dashboard";
+    }
+  }, [loading, user]);
 
   return (
     <div className="app">

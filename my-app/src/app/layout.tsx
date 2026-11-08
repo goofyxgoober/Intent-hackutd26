@@ -12,12 +12,12 @@ export const metadata: Metadata = {
 
 export default function RootLayout({ children }: { children: React.ReactNode }) {
   return (
-    <html lang="en">
+    <html lang="en" suppressHydrationWarning>
       <head>
         <link rel="preconnect" href="https://fonts.googleapis.com" />
         <link rel="stylesheet" href="https://fonts.googleapis.com/css2?family=Caveat:wght@400;500&family=JetBrains+Mono:wght@400;500;600&display=swap" />
       </head>
-      <body>
+      <body suppressHydrationWarning>
         <ChalkBoard />
         {children}
       </body>

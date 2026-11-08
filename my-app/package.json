@@ -7,8 +7,9 @@
     "build": "next build",
     "start": "next start",
     "lint": "eslint",
-    "dev:api": "PYTHONPATH=.:backend python3 -m uvicorn app.main:app --app-dir backend --reload --port 8000",
-    "test:api": "python3 -m pytest"
+    "dev:api": "PYTHONPATH=.:backend PATH=\"./.venv/bin:../.venv/bin:$PATH\" python3 -m uvicorn app.main:app --app-dir backend --reload --port 8000",
+    "test:api": "PATH=\"./.venv/bin:../.venv/bin:$PATH\" python3 -m pytest",
+    "dev:all": "npm run dev:api & npm run dev"
   },
   "dependencies": {
     "@dagrejs/dagre": "^3.1.3",

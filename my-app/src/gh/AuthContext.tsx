@@ -36,7 +36,7 @@ export function AuthProvider({ children }: { children: ReactNode }) {
 
   // Full-page redirect: the OAuth dance happens on the backend.
   const login = useCallback(() => {
-    window.location.href = `${BACKEND_URL}/auth/github/login`;
+    window.location.href = "/auth/github/login";
   }, []);
 
   const logout = useCallback(async () => {

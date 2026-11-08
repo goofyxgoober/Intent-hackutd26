@@ -4,8 +4,6 @@ import type { NextConfig } from "next";
 const BACKEND = process.env.BACKEND_URL ?? "http://localhost:8000";
 
 const nextConfig: NextConfig = {
-  cacheComponents: true,
-  partialPrefetching: true,
   turbopack: {
     rules: {
       "*.css": {
@@ -16,8 +14,7 @@ const nextConfig: NextConfig = {
   },
   async rewrites() {
     return [
-      { source: "/auth/me", destination: `${BACKEND}/auth/me` },
-      { source: "/auth/logout", destination: `${BACKEND}/auth/logout` },
+      { source: "/auth/:path*", destination: `${BACKEND}/auth/:path*` },
       { source: "/api/:path*", destination: `${BACKEND}/api/:path*` },
     ];
   },

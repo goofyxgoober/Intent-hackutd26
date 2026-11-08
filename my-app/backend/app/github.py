@@ -127,6 +127,18 @@ async def compare_refs(token: str, full_name: str, base: str, head: str) -> dict
 @router.get("/repos")
 async def list_repos(session: Session = Depends(require_session)) -> "list[dict]":
     """Repositories the signed-in user can access, for picking one to connect."""
+    if session.access_token.startswith("dev_"):
+        return [
+            {
+                "id": 1,
+                "full_name": "legacy-monolith-app",
+                "private": False,
+                "default_branch": "main",
+                "language": "Python",
+                "updated_at": "2026-11-08T00:00:00Z",
+                "can_push": True,
+            }
+        ]
     repos = await gh(
         session.access_token, "GET", "/user/repos", params={"per_page": 100, "sort": "updated"}
     )

@@ -1,5 +1,5 @@
 import time
-from fastapi import APIRouter, HTTPException, Depends
+from fastapi import APIRouter, HTTPException, Depends, WebSocket, WebSocketDisconnect
 from typing import List, Optional
 
 from app.copilot.core.interfaces import BaseGraphStore, BaseLLMAgent, BaseTestRunner
@@ -249,6 +249,21 @@ async def extract_intent_from_syntax(
 async def get_current_graph(graph_store: BaseGraphStore = Depends(get_graph_store)):
     """Returns the full IntentGraph structure for Vishjit's visualizer."""
     return graph_store.get_graph()
+
+
+@router.websocket("/graph")
+async def ws_get_graph(websocket: WebSocket):
+    """WebSocket stream for Vishjit's visualizer."""
+    await websocket.accept()
+    try:
+        from app.copilot.services.graph.factory import GraphStoreFactory
+        graph = GraphStoreFactory.get_store("memory").get_graph()
+        await websocket.send_json({"type": "snapshot", "graph": graph.model_dump()})
+        await websocket.send_json({"type": "status", "stage": 1, "message": "connected to graph stream"})
+        while True:
+            await websocket.receive_text()
+    except WebSocketDisconnect:
+        pass
 
 
 @router.post("/graph/nodes", response_model=IntentNode)

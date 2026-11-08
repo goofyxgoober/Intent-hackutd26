@@ -29,7 +29,8 @@ export default function DashboardPage() {
       .catch((e: Error) => setError(e.message));
   }, []);
 
-  const login = user!.login;
+  if (!user) return <div className="centered muted">Loading…</div>;
+  const login = user.login;
 
   return (
     <div className="app">

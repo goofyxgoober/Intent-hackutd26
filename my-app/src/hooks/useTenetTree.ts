@@ -30,8 +30,9 @@ export interface TenetTreeState {
  */
 export function useTenetTree(source: GraphSource, repo: string, enabled: boolean): TenetTreeState {
   const offline = source.kind === "mock";
-  const [tree, setTree] = useState<TreeView | null>(offline ? (fixture as unknown as TreeView) : null);
-  const [status, setStatus] = useState<TenetStatus>(offline ? "ready" : "loading");
+  const isDemo = offline || !repo.includes("/");
+  const [tree, setTree] = useState<TreeView | null>(isDemo ? (fixture as unknown as TreeView) : null);
+  const [status, setStatus] = useState<TenetStatus>(isDemo ? "ready" : "loading");
   const [error, setError] = useState<string | null>(null);
   const [workspaceId, setWorkspaceId] = useState<number | null>(null);
   const [notice, setNotice] = useState<string | null>(null);
@@ -55,24 +56,40 @@ export function useTenetTree(source: GraphSource, repo: string, enabled: boolean
       try {
         let full = repo.includes("/") ? repo : null;
         if (!full) {
-          const mine = await api<{ full_name: string }[]>("/api/repos");
-          full = mine.find((r) => r.full_name.split("/")[1] === repo)?.full_name ?? null;
+          try {
+            const mine = await api<{ full_name: string }[]>("/api/repos");
+            full = mine.find((r) => r.full_name.split("/")[1] === repo)?.full_name ?? null;
+          } catch {
+            // Not signed in to GitHub yet; keep demo tree for demo repos
+            if (isDemo && !cancelled) {
+              setTree(fixture as unknown as TreeView);
+              setStatus("ready");
+              return;
+            }
+          }
         }
         if (!full) {
-          if (!cancelled) setStatus("unlinked");
+          if (!cancelled) setStatus(isDemo ? "ready" : "unlinked");
           return;
         }
         const [owner, name] = full.split("/");
         const ws = await api<{ id: number }>(`/api/repos/${owner}/${name}/connect`, { method: "POST" });
         if (!cancelled) setWorkspaceId(ws.id);
       } catch (e) {
-        if (!cancelled) fail(e);
+        if (!cancelled) {
+          if (isDemo) {
+            setTree(fixture as unknown as TreeView);
+            setStatus("ready");
+          } else {
+            fail(e);
+          }
+        }
       }
     })();
     return () => {
       cancelled = true;
     };
-  }, [offline, enabled, repo, workspaceId, fail]);
+  }, [offline, enabled, repo, workspaceId, fail, isDemo]);
 
   const reload = useCallback(async () => {
     const w = wsApiRef.current;
