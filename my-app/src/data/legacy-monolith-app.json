@@ -1,0 +1,173 @@
+{
+  "repo_name": "legacy-monolith-app",
+  "nodes": [
+    {
+      "node_id": "auth_flow_validate_session",
+      "name": "Validate Session Token",
+      "source_file": "src/legacy/auth/session.py",
+      "intent_summary": "Verifies that incoming HTTP Authorization header contains a valid, non-expired cryptographic HMAC signature before session hydration.",
+      "inputs": {
+        "auth_header": "Raw HTTP Authorization header string",
+        "client_ip": "IPv4/IPv6 client address for replay detection"
+      },
+      "outputs": {
+        "user_context": "Hydrated UserPrincipal object",
+        "error": "SessionExpiredException (401) or InvalidSignatureException (403)"
+      },
+      "business_invariants": [
+        "Expired session tokens must immediately reject with HTTP 401 Unauthorized.",
+        "Database lookup occurs ONLY if token signature and timestamp integrity validation passes.",
+        "IP mismatch on high-privilege administrative tokens triggers immediate revocation."
+      ],
+      "downstream_dependencies": [
+        "db_user_lookup",
+        "audit_compliance_logger"
+      ],
+      "raw_code_snippet": null
+    },
+    {
+      "node_id": "db_user_lookup",
+      "name": "Legacy User Principal Lookup",
+      "source_file": "src/legacy/database/user_dao.py",
+      "intent_summary": "Retrieves complete user record from raw relational SQL tables and hydrates role-based permission sets.",
+      "inputs": {
+        "user_id": "Integer UID",
+        "with_roles": "Boolean flag indicating whether to join legacy_roles table"
+      },
+      "outputs": {
+        "user_record": "User entity dictionary with permissions and status"
+      },
+      "business_invariants": [
+        "Users marked 'is_suspended = 1' must be barred from all downstream write mutations.",
+        "Raw database credentials must never leak into exception stack traces."
+      ],
+      "downstream_dependencies": [
+        "checkout_order_manager",
+        "audit_compliance_logger"
+      ],
+      "raw_code_snippet": null
+    },
+    {
+      "node_id": "checkout_order_manager",
+      "name": "Checkout Order Orchestrator",
+      "source_file": "src/legacy/sales/checkout.py",
+      "intent_summary": "Coordinates item reservations, price calculations, promo deductions, and triggers payment processing.",
+      "inputs": {
+        "cart_id": "UUID cart reference",
+        "user_id": "Validated user identifier",
+        "promo_code": "Optional promotional voucher string"
+      },
+      "outputs": {
+        "order_receipt": "Finalized OrderSummary object with order_id and status 'CONFIRMED'"
+      },
+      "business_invariants": [
+        "Order total amount can never be negative, even with 100% coupon discount.",
+        "Items must be reserved in inventory before charging the payment gateway.",
+        "If payment fails, reserved inventory must roll back immediately."
+      ],
+      "downstream_dependencies": [
+        "inventory_allocator",
+        "payment_gateway_processor",
+        "audit_compliance_logger"
+      ],
+      "raw_code_snippet": null
+    },
+    {
+      "node_id": "inventory_allocator",
+      "name": "Inventory Reservation Allocator",
+      "source_file": "src/legacy/warehouse/inventory.py",
+      "intent_summary": "Executes atomic pessimistic lock on warehouse stock to guarantee item availability during checkout.",
+      "inputs": {
+        "sku_list": "List of (SKU, quantity) tuples",
+        "reservation_timeout_seconds": "Duration before locked stock expires (default 900s)"
+      },
+      "outputs": {
+        "reservation_id": "Lock confirmation token"
+      },
+      "business_invariants": [
+        "Stock counter can never decrement below zero (no backorders allowed).",
+        "Expired locks must automatically release stock back to active catalog."
+      ],
+      "downstream_dependencies": [
+        "audit_compliance_logger"
+      ],
+      "raw_code_snippet": null
+    },
+    {
+      "node_id": "payment_gateway_processor",
+      "name": "Payment Processing & Settlement",
+      "source_file": "src/legacy/billing/processor.py",
+      "intent_summary": "Dispatches transaction tokens to payment gateway with idempotency checks and anti-fraud threshold validation.",
+      "inputs": {
+        "amount_cents": "Positive integer amount",
+        "currency": "3-letter ISO code",
+        "payment_method_token": "Tokenized payment method string",
+        "idempotency_key": "Unique UUID preventing duplicate charge"
+      },
+      "outputs": {
+        "charge_status": "Enum: SUCCESS, DECLINED, FRAUD_HOLD",
+        "transaction_id": "External gateway transaction ID"
+      },
+      "business_invariants": [
+        "Transactions exceeding $10,000 must flag as FRAUD_HOLD requiring manual compliance review.",
+        "Idempotency keys must be unique per 24-hour sliding window to prevent double charges.",
+        "Card CVV and raw PAN numbers must never be logged or persisted in storage."
+      ],
+      "downstream_dependencies": [
+        "audit_compliance_logger"
+      ],
+      "raw_code_snippet": null
+    },
+    {
+      "node_id": "audit_compliance_logger",
+      "name": "Audit & Compliance Event Logger",
+      "source_file": "src/legacy/security/audit.py",
+      "intent_summary": "Appends tamper-resistant, append-only logs for all security, authentication, and monetary state transitions.",
+      "inputs": {
+        "event_type": "SecurityEventEnum (AUTH_SUCCESS, PAYMENT_PROCESSED, REVISION_MUTATED)",
+        "payload": "Redacted event context JSON"
+      },
+      "outputs": {
+        "log_entry_id": "Cryptographic merkle index hash"
+      },
+      "business_invariants": [
+        "All PII and sensitive payment keys must be redacted prior to write.",
+        "Audit log writes must be synchronous and fail-closed: if logger crashes, transaction aborts."
+      ],
+      "downstream_dependencies": [],
+      "raw_code_snippet": null
+    }
+  ],
+  "edges": [
+    {
+      "source": "auth_flow_validate_session",
+      "target": "db_user_lookup",
+      "relation": "triggers_on_valid_token"
+    },
+    {
+      "source": "auth_flow_validate_session",
+      "target": "audit_compliance_logger",
+      "relation": "logs_auth_events"
+    },
+    {
+      "source": "db_user_lookup",
+      "target": "checkout_order_manager",
+      "relation": "provides_active_user"
+    },
+    {
+      "source": "checkout_order_manager",
+      "target": "inventory_allocator",
+      "relation": "locks_stock_before_charge"
+    },
+    {
+      "source": "checkout_order_manager",
+      "target": "payment_gateway_processor",
+      "relation": "charges_after_stock_lock"
+    },
+    {
+      "source": "payment_gateway_processor",
+      "target": "audit_compliance_logger",
+      "relation": "logs_financial_events"
+    }
+  ]
+}
